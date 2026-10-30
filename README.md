@@ -1,6 +1,6 @@
 # Outrunner
 
-**Status:** Experimental, pre-v0.1 · **Implementation language:** C++20 · **License:** Not yet decided
+**Status:** Experimental, pre-v0.1 · **Implementation language:** C++20 · **License:** Apache 2.0
 
 Outrunner is an experimental, vendor-independent GPU compute compiler and runtime project. Its goal is to understand and reproduce the essential mechanisms behind CUDA-like computing: kernel programming, compilation, memory management, dispatch, synchronization, and hardware execution.
 
