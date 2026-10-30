@@ -1,0 +1,22 @@
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+
+# Compiled binaries and object files
+*.o
+*.obj
+*.a
+*.so
+*.exe
+*.out
+
+# Local executables
+/vector_add
+
+# Editor files
+.vscode/
+.idea/
+
+# System files
+.DS_Store
