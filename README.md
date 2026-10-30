@@ -56,7 +56,3 @@ This compiles an object file; it does not run a test or produce a standalone exe
 - [Design decisions](docs/DESIGN_DECISIONS.md)
 - [Technical backlog](docs/TECHNICAL_BACKLOG.md)
 - [Learning log](docs/LEARNING_LOG.md)
-
-## Development agreement
-
-The project owner writes production code. The assistant drafts and maintains documentation, provides guided teaching, reviews code, helps debug and design experiments, and does not replace the owner's implementation work without an explicit request. Build first; study low-level concepts when needed for a concrete Outrunner task.
