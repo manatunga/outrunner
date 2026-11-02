@@ -4,7 +4,7 @@ This log records **decisions**, **proposals**, and **open questions** separately
 
 ## D-001 — Build-first mentorship [Agreed]
 
-**Decision:** The project owner implements production code. The assistant drafts/maintains documentation and guides, reviews, and explains experiments and implementation. Teach C++, assembly, GPU concepts, and compiler/runtime topics when needed by an active engineering task.
+**Decision:** The project owner implements production code. The assistant drafts and maintains documentation and guides, reviews, and explains experiments and implementation. Teach C++, assembly, GPU concepts, and compiler/runtime topics when needed by an active engineering task.
 
 **Rationale:** Avoid indefinite prerequisite study and preserve hands-on understanding.
 
@@ -49,6 +49,24 @@ This log records **decisions**, **proposals**, and **open questions** separately
 ## D-007 — Cross-vendor claims require evidence [Agreed]
 
 **Decision:** Design for portability; verify on specific hardware before claiming vendor support. First release target is CPU plus one compatible Vulkan GPU.
+
+## D-008 — Sequential CPU reference kernels [Agreed]
+
+**Decision:** Outrunner's initial CPU kernels are implemented as sequential reference functions operating on caller-provided host-accessible buffers.
+
+These functions establish computational correctness baselines for future CPU execution and GPU backends.
+
+**Rationale:** Establish known-correct implementations of representative workloads before introducing dispatch, parallel execution, compiler lowering, and GPU-specific behavior.
+
+**Consequences:**
+
+- Reference kernels do not allocate or own their input/output buffers.
+- Reference kernels execute sequentially on a single CPU thread.
+- Reference kernels do not define the eventual work-item or workgroup execution model.
+- Future execution backends must preserve the agreed computational semantics.
+- Vector addition and matrix multiplication provide initial correctness workloads.
+
+**Revisit if:** The reference execution model or ownership requirements materially change.
 
 ## Open decisions
 

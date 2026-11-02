@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** Proposed v0.1 architecture; not an implementation description.
+**Status:** Proposed v0.1 architecture; includes a distinction between implemented components and planned system architecture.
 
 ## Objective
 
@@ -15,49 +15,87 @@ Implement a small end-to-end compute stack with a shared host API, a restricted 
 5. **Vulkan backend** — create Vulkan compute resources, upload buffers, dispatch SPIR-V compute shaders, synchronize, and read results.
 6. **Diagnostics** — expose compilation steps, selected device, dispatch dimensions, errors, and measured timings.
 
+## Planned system architecture
+
 ```text
-                      OUTRUNNER v0.1
+                       OUTRUNNER v0.1
 
-                      Kernel Source
+                       Kernel Source
                             |
                             v
-                    Parse / Validate
+                     Parse / Validate
                             |
                             v
-                    Intermediate Rep.
-                       (Proposed)
+                     Intermediate Rep.
+                        (Proposed)
                             |
-                +-----------+-----------+
-                |                       |
-                v                       v
-          CPU Lowering             SPIR-V Lowering
-                |                       |
-                v                       v
-         CPU Executable          SPIR-V Module
-                |                       |
-                v                       v
-         +-------------+         +-------------+
-         | CPU Backend |         | Vulkan      |
-         |             |         | GPU Backend |
-         +------+------+         +------+------+
-                ^                       ^
-                |                       |
-                +-----------+-----------+
+                 +----------+----------+
+                 |                     |
+                 v                     v
+           CPU Lowering          SPIR-V Lowering
+                 |                     |
+                 v                     v
+          CPU Executable         SPIR-V Module
+                 |                     |
+                 v                     v
+          +-------------+       +-------------+
+          | CPU Backend |       | Vulkan      |
+          |             |       | GPU Backend |
+          +------+------+       +------+------+
+                 ^                     ^
+                 |                     |
+                 +----------+----------+
                             |
-                      Runtime Dispatch
+                       Runtime Dispatch
                             ^
                             |
-                       Public API
+                        Public API
                             ^
                             |
-                     Host Application
-
-           Runtime responsibilities:
-           - Device discovery and selection
-           - Buffer allocation and transfers
-           - Kernel loading and dispatch
-           - Synchronization and error handling
+                      Host Application
 ```
+
+Runtime responsibilities:
+
+- Device discovery and selection
+- Buffer allocation and transfers
+- Kernel loading and dispatch
+- Synchronization and error handling
+
+## Current implementation
+
+The current implementation establishes sequential CPU reference kernels.
+
+### CPU reference library
+
+The `outrunner_cpu` static library contains the reusable CPU implementations.
+
+| Kernel | Public interface | Implementation | Description |
+|---|---|---|---|
+| Vector addition | `outrunner::cpu::add_vector` | `src/cpu/vector_add.cpp` | Element-wise addition of two floating-point arrays |
+| Matrix multiplication | `outrunner::cpu::matmul` | `src/cpu/matmul.cpp` | Sequential multiplication of row-major floating-point matrices |
+
+### Reference kernel characteristics
+
+- Implemented in C++20.
+- Operate on caller-provided host-accessible buffers.
+- Execute sequentially on a single CPU thread.
+- Do not allocate or manage buffers.
+- Provide computational correctness baselines.
+- Do not yet use a general kernel language, IR, work-item model, or dispatch system.
+
+The matrix multiplication implementation supports compatible rectangular dimensions and calculates each output element using a row-by-column dot product.
+
+### Build and test infrastructure
+
+CMake currently provides:
+
+- The `outrunner_cpu` static library.
+- An independent `test_vector_add` executable.
+- An independent `test_matmul` executable.
+- CTest registration for both test executables.
+
+The reference implementations are tested independently of any future runtime or compiler infrastructure.
 
 ## Execution lifecycle (target)
 

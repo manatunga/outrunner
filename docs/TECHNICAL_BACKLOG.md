@@ -15,7 +15,7 @@ Ideas here are tracked rather than silently discarded. Items are **not** commitm
 | B-009 | More numeric types | v0.1 focuses on simple float32 workloads | After M7 | Cross-backend conformance tests for each new type |
 | B-010 | Multi-GPU execution | Beyond minimal runtime | Post-v0.1 | Two-device workload with explicit data placement and correct output |
 | B-011 | CUDA/PTX comparative research | Research track, not initial runtime dependency | During M4–M6 investigations | Annotated comparisons of launch, memory, IR and generated artifacts |
-| B-012 | Robust packaging/CI | Initial build and test path still forming | M1 test/CMake complete | Reproducible clean builds and automated tests |
+| B-012 | Automated CI and packaging | Local CMake/CTest build path established; automated clean-build verification and distribution remain future work | After M1 / before public release | Reproducible clean builds, automated test execution, and documented packaging |
 
 ## Promotion rule
 

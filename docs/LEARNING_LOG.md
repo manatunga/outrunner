@@ -26,17 +26,101 @@ Record experiments, commands, observed output, corrections, and the direct impli
 
 **Outrunner connection:** Inspect generated instructions when compiler lowering, memory indexing, or performance experiments require it; avoid unrelated assembly drills.
 
-## OR-M1.1 — Reusable CPU kernel [Implementation drafted; correction pending]
+## OR-M1.1 — Reusable CPU vector addition [Complete]
 
-**Files:** `include/outrunner/cpu/vector_add.hpp`, `src/cpu/vector_add.cpp`.
+**Files:**
+- `include/outrunner/cpu/vector_add.hpp`
+- `src/cpu/vector_add.cpp`
 
 **Interface:** `outrunner::cpu::add_vector(const float*, const float*, float*, std::size_t)`.
 
-**Review:** Header/source separation, const inputs, writable output, and element-wise addition correct. Replace conversion from `std::size_t` to `int` with a `std::size_t` loop index to avoid narrowing.
+**Implementation:** Reusable sequential element-wise addition using caller-provided arrays.
 
-## Next: OR-M1.2
+**Review:** Header/source separation, const inputs, writable output, and element-wise addition established. The loop index uses `std::size_t`, avoiding narrowing the array length to `int`.
 
-Compile and test the reusable kernel with multiple lengths, then add minimal CMake integration. Record compiler commands, test outputs, and failures here when observed.
+## OR-M1.2 — CMake build and vector addition tests [Complete]
+
+**Files:**
+- `CMakeLists.txt`
+- `tests/test_vector_add.cpp`
+
+**Build configuration:**
+- C++20 required.
+- `outrunner_cpu` static library.
+- Independent `test_vector_add` executable.
+- CTest registration.
+
+**Tests:** Four cases covering ordinary arrays, empty input, a single element, and mixed positive/negative values.
+
+**Verification commands:**
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+**Observed result:** Vector addition test passed.
+
+## OR-M1.3 — Sequential CPU matrix multiplication [Complete]
+
+**Files:**
+- `include/outrunner/cpu/matmul.hpp`
+- `src/cpu/matmul.cpp`
+- `tests/test_matmul.cpp`
+
+**Interface:** `outrunner::cpu::matmul(const float*, const float*, float*, std::size_t, std::size_t, std::size_t)`.
+
+**Implementation:** Sequential row-major matrix multiplication using three nested loops.
+
+**Concepts established:**
+
+- Compatible matrix dimensions: A is `m × k`, B is `k × n`, and output is `m × n`.
+- Row-major indexing for accessing matrix elements.
+- Dot products between rows of A and columns of B.
+- Accumulation of products into a separate sum for each output element.
+- Caller-owned input and output buffers.
+- Natural zero-dimension behavior.
+
+**Tests:** Six cases covering rectangular matrices, square matrices, single-element matrices, zero shared dimension, zero output rows, and zero output columns.
+
+## OR-M1.4 — Complete test integration [Complete]
+
+**Build configuration:** Both CPU reference kernels are compiled into `outrunner_cpu`. Their test sources are built as separate executables and registered independently with CTest.
+
+**Verification commands:**
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+**Observed result:**
+
+```text
+Test project /home/manatunga/projects/outrunner/build
+    Start 1: vector_add
+1/2 Test #1: vector_add ....................... Passed
+    Start 2: matmul
+2/2 Test #2: matmul ........................... Passed
+
+100% tests passed, 0 tests failed out of 2
+```
+
+**Environment:** GNU C++ build through CMake in the WSL2 project environment.
+
+**Outrunner connection:** The project now has two independently tested sequential CPU reference kernels. They provide correctness baselines for future execution backends.
+
+## OR-M1.5 — Final review and milestone completion [In progress]
+
+**Goal:** Review production interfaces, implementations, tests, build configuration, and documentation before closing M1.
+
+**Remaining work:**
+- Review final source and test changes.
+- Complete documentation updates.
+- Perform clean build and final verification.
+- Review Git diff and commit the milestone.
 
 ## Entry template
 
