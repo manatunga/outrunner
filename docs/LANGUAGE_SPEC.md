@@ -1,148 +1,106 @@
-# Kernel Language Specification
+# Kernel Language Specification (Skeleton)
 
-**Status:** Exploratory proposal. No syntax, grammar, or complete semantic model has been finalized. No kernel-language compiler currently exists.
+**Status:** Skeleton, 2026-11-22. Records decided points and lists open ones. Not yet a complete specification; the compiler milestone (OR-M6) fills it in.
+**Related:** `DESIGN_DECISIONS.md` (D-006 to D-013), `ARCHITECTURE.md`.
 
-## 1. Purpose
+**Section status:** *Decided* (an accepted decision exists), *Proposed* (a recommendation awaiting confirmation), *Open* (not yet discussed).
 
-Outrunner requires a restricted, backend-independent way to express parallel computations.
+## 1. Design principles — Decided
 
-The language must eventually provide a common kernel definition that can be compiled or translated for different execution backends without requiring users to maintain separate CPU and GPU implementations.
+- A small, own C-like language with C++-style syntax (D-008). It is deliberately smaller than C++: no classes, exceptions, standard library, recursion, dynamic allocation or (initially) templates.
+- CUDA-shaped execution model with concepts kept familiar and surface details improved where objectively better (D-004, D-006).
+- Every kernel has defined semantics that the IR interpreter can execute (`ARCHITECTURE.md`, invariant 3).
+- Clear errors with source locations; an unsupported C++ feature is reported as such, never silently misparsed.
 
-For v0.1, the language should support enough expressive power for:
+## 2. Execution model — Decided
 
-- Vector addition.
-- Element-wise operations, including activation functions.
-- Basic matrix multiplication.
+- A launch has a grid of blocks; each block has threads.
+- Threads in a block share fast shared memory and can synchronize with barriers.
+- Blocks have no ordering and no portable forward-progress guarantee between them (D-012).
+- Subgroup (warp-like) operations and matrix operations are an **optional** layer, never required by the core (D-006).
 
-The initial language should remain deliberately small. Every supported construct must have a defined meaning and a feasible implementation path through validation and backend lowering.
+## 3. Types — Proposed
 
-The objective is not to reproduce an existing general-purpose programming language. It is to establish a focused kernel programming model suitable for Outrunner's compiler and runtime architecture.
+- MVP scalar types: 32-bit signed and unsigned integers, 32-bit float, bool. More types are in the backlog (B-015).
+- Pointers carry an address space (section 4).
+- Fixed-size arrays and simple structs with defined layout (needed for the host/device layout guarantee, D-009).
+- **Open:** integer overflow semantics. Recommendation: defined two's-complement wrapping, for determinism across devices.
+- **Open:** the complete list of conversions and promotions.
 
-## 2. Candidate semantic requirements
+## 4. Address spaces — Decided
 
-The following requirements describe capabilities the language is expected to provide. They do not establish final syntax or implementation decisions.
+Four spaces, part of the type system (D-013): **global**, **shared** (workgroup), **constant**, **private**. A pointer's space is checked at compile time; mismatches are errors, not silent conversions.
+**Open:** syntax for declaring shared memory and constants, and the rules for converting between pointer spaces.
 
-### 2.1 Kernel entry points
+## 5. Functions and control flow — Proposed
 
-- A kernel must have an identifiable entry point.
-- A kernel executes over a set of logical work items.
-- Each logical work item must be able to identify its position within the dispatched execution range.
-- Kernel arguments must have defined types and usage rules.
+- Kernel entry functions, plus device helper functions that are inlined.
+- `if`/`else`, `for`, `while`, `break`, `continue`, `return`.
+- No recursion, function pointers or dynamic allocation.
+- **Open:** exact grammar, loop-bound restrictions (if any), and the extension for kernel files.
 
-### 2.2 Types
+## 6. Built-ins — Decided (names), Open (full list)
 
-The initial type system should consider:
+- `global_index()` replaces hand-written block-and-thread index arithmetic (D-010).
+- Block, thread and grid indices and sizes; a grid-stride loop helper; barrier; atomics (section 8); `fma()` (section 7).
+- **Open:** exact names and the 2D/3D index forms.
 
-- 32-bit floating-point values.
-- Suitable integer types for indexing and dimensions.
-- Additional scalar types only where required by the initial workloads.
+## 7. Floating-point semantics — Decided
 
-Numeric conversion, overflow, and floating-point behavior must eventually be specified consistently across supported backends.
+- Contraction is part of the language: `a*b+c` written within a single expression is fused; never across statements; identical on every device (D-011).
+- `fma()` is available explicitly.
+- A per-kernel opt-in **fast** mode permits reassociation, flush-to-zero and approximate math, with a declared tolerance checked by the correctness harness.
+- Strict mode requires preserved denormals and NaNs; devices that cannot provide this are reported by verify-before-trust.
+- **Open:** the ULP bounds for division, square root and transcendental functions in strict mode (this section is where `TESTING.md` points); the attribute syntax for selecting the mode and declaring the tolerance.
 
-### 2.3 Memory and buffers
+## 8. Atomics and memory model — Decided
 
-The language must support:
+- Scoped, ordered atomics in the style of C++ `atomic_ref` (D-012).
+- Scopes: block, device. Orders: relaxed, acquire, release, acq_rel, seq_cst. Default seq_cst.
+- No `volatile`-and-fence idioms.
+- 64-bit and float atomic add are optional, queryable capabilities with flagged fallbacks.
+- Excluded from the MVP: grid-wide synchronization and inter-block spin-waiting. The compiler marks kernels with inter-block dependence.
+- **Open:** the precise memory-model rules for shared and global memory, and the syntax for atomic types or operations.
 
-- Buffer arguments.
-- Indexed reads and writes.
-- Defined memory access rules.
-- Clear distinctions between supported memory regions or address spaces, if multiple address spaces are introduced.
-- Defined aliasing and access restrictions.
+## 9. Barriers and divergence — Decided (rule), Open (analysis)
 
-The language must not assume that CPU and GPU memory have identical physical or ownership characteristics.
+- A barrier must be reached by every thread in the block (D-013).
+- The compiler flags barriers in divergent control flow, conservatively; the exact analysis is **open**.
 
-### 2.4 Computation and control flow
+## 10. Tunable and specialization parameters — Proposed
 
-Candidate constructs include:
+- Block size, shared-memory size and user tuning parameters are specialization parameters that select cached pipeline variants (D-027, D-016).
+- **Open:** how a kernel declares a tunable parameter, its legal range and its default.
 
-- Arithmetic operations.
-- Comparisons.
-- Conditional statements.
-- Bounded loops where required by MVP workloads.
+## 11. Kernel metadata — Decided (contents), Open (format)
 
-The supported subset should be small enough to validate and lower reliably.
+The compiler emits, per kernel: name, argument types and layouts, access hints (read-only, write-only, read-write), a marker for inter-block dependence, and the tolerance for fast-mode kernels (D-009, D-026).
 
-### 2.5 Work-item indexing
+## 12. Host interop — Decided (mechanism), Open (syntax)
 
-A kernel must be able to obtain its logical execution index.
+- Single-source files are split by the driver; the compiler also generates a typed host header (D-009).
+- Host/device structs have defined layout.
+- **Open:** how a kernel is marked in a single-source file, and how kernel parameters map to host argument types.
 
-The model must eventually define:
+## 13. Out-of-bounds and undefined behavior — Open
 
-- Global work-item indexing.
-- Whether local work-item indexing is exposed.
-- One-dimensional and multidimensional execution.
-- Workgroup dimensions and their relationship to global dimensions.
-- Behavior for work items whose indices exceed the useful input range.
+Recommendation: bounds checking in debug builds (D-010) and undefined behavior in release builds, with the list of undefined behaviors stated explicitly.
 
-The logical indexing model must be consistent across CPU and GPU backends.
+## 14. Versioning of the language — Proposed
 
-## 3. Illustrative syntax
+A language version is declared per source file; the compiler rejects versions it does not support with a clear message (consistent with D-032).
 
-The following example illustrates one possible C-like representation:
+## 15. Non-normative example
+
+Illustrative only; syntax is not final.
 
 ```text
-kernel void vector_add(
-    global float* a,
-    global float* b,
-    global float* out,
-    int n
-) {
-    int i = global_id(0);
-    if (i < n) out[i] = a[i] + b[i];
+kernel void add(const float* a, const float* b, float* c, size_t n) {
+    size_t i = global_index();
+    if (i < n) c[i] = a[i] + b[i];
 }
 ```
 
-**This is illustrative syntax only. It is not executable Outrunner code.**
+## 16. Open items summary
 
-The names `kernel`, `global`, and `global_id` are placeholders, not accepted design decisions. The example does not establish a grammar, type system, ABI, or memory model.
-
-## 4. Current implementation boundary
-
-The current CPU implementations are sequential reference functions:
-
-- `outrunner::cpu::add_vector`
-- `outrunner::cpu::matmul`
-
-They operate on caller-provided host-accessible buffers and do not execute through a kernel-language frontend, logical work-item model, or general dispatch system.
-
-These implementations establish computational correctness baselines. They do not define the final kernel language or its execution semantics.
-
-The future language and backend model must preserve the intended computational behavior of these workloads while allowing parallel execution.
-
-## 5. Decisions required before implementation
-
-The following areas remain open:
-
-1. **Kernel input format:** custom source language, constrained C-like syntax, or structured IR as the initial input.
-2. **Numeric semantics:** supported numeric types, casts, integer overflow, and floating-point behavior.
-3. **Indexing model:** global IDs, local IDs, dimensions, and workgroups.
-4. **Memory model:** buffer/address-space representation, aliasing, and access rules.
-5. **Control flow:** supported loops, conditional statements, and validation restrictions.
-6. **Kernel arguments:** argument representation and ABI mapping to CPU and Vulkan backends.
-7. **Bounds behavior:** how invalid or out-of-range accesses are handled.
-8. **Backend equivalence:** how CPU and SPIR-V implementations are tested against the same semantic requirements.
-
-These decisions must be documented before the corresponding features are treated as part of the supported language.
-
-## 6. v0.1 acceptance criteria
-
-The language/compiler path must eventually demonstrate that:
-
-- One kernel definition can be used for both CPU and compatible Vulkan GPU execution.
-- The same source does not require manually maintained device-specific kernel implementations.
-- Vector addition, matrix multiplication, and the required element-wise workload execute correctly.
-- Supported constructs have consistent semantics across the tested backends.
-- Unsupported constructs fail with understandable diagnostics.
-- Kernel arguments, indexing, and memory access follow documented rules.
-
-## 7. Non-goals
-
-The initial language is not intended to provide:
-
-- A complete general-purpose programming language.
-- Full C or C++ compatibility.
-- CUDA source or binary compatibility.
-- An unrestricted pointer and memory model.
-- A complete set of advanced GPU-specific language features.
-
-The initial objective is a small, coherent kernel language that can grow without compromising backend independence.
+Integer overflow semantics; conversions; shared and constant declaration syntax; pointer-space conversion rules; grammar and file extension; built-in names; floating-point ULP bounds and mode syntax; memory-model details
