@@ -4,55 +4,93 @@ Record experiments, commands, observed output, corrections, and the direct impli
 
 ## OR-E1 — CPU vector addition [Complete]
 
-**Experiment:** C++ arrays and a loop computed `[6, 8, 10, 12]` from `[1, 2, 3, 4] + [5, 6, 7, 8]`.
+**Date:** October 2026
 
-**Observation:** GCC and Clang compiled the standalone experiment at `-O0` with standard warnings enabled.
+**Goal:** Compute an element-wise vector addition in standalone C++.
 
-**Outrunner connection:** Establishes baseline computation later expressed as a reusable kernel and parallel dispatch.
+**Environment and commands:** GCC and Clang compiled the standalone experiment at `-O0` with standard warnings enabled. Exact commands not recorded.
+
+**Observed results:** C++ arrays and a loop computed `[6, 8, 10, 12]` from `[1, 2, 3, 4] + [5, 6, 7, 8]`.
+
+**Mistakes / corrections:** None recorded.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Establishes the baseline computation later expressed as a reusable kernel and parallel dispatch.
+
+**Related:** None.
+
+**Next action:** Examine array memory layout (OR-E2).
 
 ## OR-E2 — Array layout [Complete]
 
-**Observed:** Four-element `int` array used 16 bytes; consecutive elements were 4 bytes apart, with 12 bytes between `a[0]` and `a[3]`.
+**Date:** October 2026
 
-**Correction:** ASLR randomizes applicable virtual address mappings at process execution/load time, not through compiler-time random address assignment.
+**Goal:** Observe how a small array is laid out in memory.
 
-**Outrunner connection:** Buffer indexing and data layout are fundamental to GPU memory access.
+**Environment and commands:** Not recorded.
+
+**Observed results:** A four-element `int` array used 16 bytes. Consecutive elements were 4 bytes apart, with 12 bytes between `a[0]` and `a[3]`.
+
+**Mistakes / corrections:** ASLR randomizes applicable virtual address mappings at process execution/load time, not through compiler-time random address assignment.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Buffer indexing and data layout are fundamental to GPU memory access.
+
+**Related:** None.
+
+**Next action:** Introductory assembly orientation (OR-E3/E4).
 
 ## OR-E3/E4 — Introductory assembly [Complete as orientation]
 
-**Investigated:** `cmp`, CPU flags, signed/unsigned jumps, `lea`, effective addresses, and memory operands. Generated assembly file: `experiments/cpu/vector_add.s`.
+**Date:** October 2026
 
-**Key distinction:** `lea` calculates an address expression; `mov edx, [rax]` reads the value at the address in `rax`.
+**Goal:** Learn enough assembly to read the generated code for the vector-add experiment.
 
-**Outrunner connection:** Inspect generated instructions when compiler lowering, memory indexing, or performance experiments require it; avoid unrelated assembly drills.
+**Environment and commands:** Generated assembly file: `experiments/cpu/vector_add.s`. Exact commands not recorded.
+
+**Observed results:** Investigated `cmp`, CPU flags, signed/unsigned jumps, `lea`, effective addresses, and memory operands.
+
+**Mistakes / corrections:** None recorded.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Key distinction: `lea` calculates an address expression; `mov edx, [rax]` reads the value at the address in `rax`. Inspect generated instructions when compiler lowering, memory indexing, or performance experiments require it; avoid unrelated assembly drills.
+
+**Related:** None.
+
+**Next action:** Write the reusable vector-addition kernel (OR-M1.1).
 
 ## OR-M1.1 — Reusable CPU vector addition [Complete]
 
-**Files:**
+**Date:** October 2026
+
+**Goal:** Turn the experiment into a reusable CPU kernel with a public interface.
+
+**Files and interfaces:**
 - `include/outrunner/cpu/vector_add.hpp`
 - `src/cpu/vector_add.cpp`
+- `outrunner::cpu::add_vector(const float*, const float*, float*, std::size_t)`
 
-**Interface:** `outrunner::cpu::add_vector(const float*, const float*, float*, std::size_t)`.
+**Environment and commands:** Not recorded.
 
-**Implementation:** Reusable sequential element-wise addition using caller-provided arrays.
+**Observed results:** Reusable sequential element-wise addition using caller-provided arrays. Header/source separation, const inputs, writable output, and element-wise addition established.
 
-**Review:** Header/source separation, const inputs, writable output, and element-wise addition established. The loop index uses `std::size_t`, avoiding narrowing the array length to `int`.
+**Mistakes / corrections:** The loop index uses `std::size_t`, avoiding narrowing the array length to `int`.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Not recorded.
+
+**Related:** D-036 (hand-written references are the second oracle).
+
+**Next action:** Add a CMake build and tests (OR-M1.2).
 
 ## OR-M1.2 — CMake build and vector addition tests [Complete]
 
-**Files:**
+**Date:** October 2026
+
+**Goal:** Establish a reproducible build and correctness tests for vector addition.
+
+**Files and interfaces:**
 - `CMakeLists.txt`
 - `tests/test_vector_add.cpp`
 
-**Build configuration:**
-- C++20 required.
-- `outrunner_cpu` static library.
-- Independent `test_vector_add` executable.
-- CTest registration.
-
-**Tests:** Four cases covering ordinary arrays, empty input, a single element, and mixed positive/negative values.
-
-**Verification commands:**
+**Environment and commands:**
+- C++20 required; `outrunner_cpu` static library; independent `test_vector_add` executable; CTest registration.
 
 ```bash
 cmake -S . -B build
@@ -60,21 +98,35 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-**Observed result:** Vector addition test passed.
+**Observed results:** Vector addition test passed. Four cases: ordinary arrays, empty input, a single element, and mixed positive/negative values.
+
+**Mistakes / corrections:** None recorded.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Not recorded.
+
+**Related:** D-034 (CMake, C++20), D-036.
+
+**Next action:** Matrix multiplication (OR-M1.3).
 
 ## OR-M1.3 — Sequential CPU matrix multiplication [Complete]
 
-**Files:**
+**Date:** November 2026
+
+**Goal:** Add a second reference kernel: sequential row-major matrix multiplication.
+
+**Files and interfaces:**
 - `include/outrunner/cpu/matmul.hpp`
 - `src/cpu/matmul.cpp`
 - `tests/test_matmul.cpp`
+- `outrunner::cpu::matmul(const float*, const float*, float*, std::size_t, std::size_t, std::size_t)`
 
-**Interface:** `outrunner::cpu::matmul(const float*, const float*, float*, std::size_t, std::size_t, std::size_t)`.
+**Environment and commands:** Not recorded.
 
-**Implementation:** Sequential row-major matrix multiplication using three nested loops.
+**Observed results:** Sequential row-major matrix multiplication using three nested loops. Six test cases: rectangular matrices, square matrices, single-element matrices, zero shared dimension, zero output rows, and zero output columns.
 
-**Concepts established:**
+**Mistakes / corrections:** None recorded.
 
+**What this teaches about CPU/GPU/runtime/compiler behavior:**
 - Compatible matrix dimensions: A is `m × k`, B is `k × n`, and output is `m × n`.
 - Row-major indexing for accessing matrix elements.
 - Dot products between rows of A and columns of B.
@@ -82,13 +134,17 @@ ctest --test-dir build --output-on-failure
 - Caller-owned input and output buffers.
 - Natural zero-dimension behavior.
 
-**Tests:** Six cases covering rectangular matrices, square matrices, single-element matrices, zero shared dimension, zero output rows, and zero output columns.
+**Related:** D-036.
+
+**Next action:** Integrate both tests into the build (OR-M1.4).
 
 ## OR-M1.4 — Complete test integration [Complete]
 
-**Build configuration:** Both CPU reference kernels are compiled into `outrunner_cpu`. Their test sources are built as separate executables and registered independently with CTest.
+**Date:** November 2026
 
-**Verification commands:**
+**Goal:** Build both CPU reference kernels and their tests together and register them independently with CTest.
+
+**Environment and commands:** GNU C++ build through CMake in the WSL2 project environment. Both kernels are compiled into `outrunner_cpu`; their test sources are built as separate executables registered independently with CTest.
 
 ```bash
 cmake -S . -B build
@@ -96,7 +152,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-**Observed result:**
+**Observed results:**
 
 ```text
 Test project /home/manatunga/projects/outrunner/build
@@ -108,13 +164,23 @@ Test project /home/manatunga/projects/outrunner/build
 100% tests passed, 0 tests failed out of 2
 ```
 
-**Environment:** GNU C++ build through CMake in the WSL2 project environment.
+**Mistakes / corrections:** None recorded.
 
-**Outrunner connection:** The project now has two independently tested sequential CPU reference kernels. They provide correctness baselines for future execution backends.
+**What this teaches about CPU/GPU/runtime/compiler behavior:** The project now has two independently tested sequential CPU reference kernels. They provide correctness baselines for future execution backends.
+
+**Related:** D-036.
+
+**Next action:** Final review and milestone completion (OR-M1.5).
 
 ## OR-M1.5 — Final review and milestone completion [In progress]
 
+**Date:** November 2026
+
 **Goal:** Review production interfaces, implementations, tests, build configuration, and documentation before closing M1.
+
+**Environment and commands:** Not yet run.
+
+**Observed results:** Pending.
 
 **Remaining work:**
 - Review final source and test changes.
@@ -122,14 +188,25 @@ Test project /home/manatunga/projects/outrunner/build
 - Perform clean build and final verification.
 - Review Git diff and commit the milestone.
 
+**Mistakes / corrections:** Pending.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:** Pending.
+
+**Related:** D-036.
+
+**Next action:** Close M1, then begin spikes S4, S2, S1 and S3 (`ROADMAP.md`).
+
 ## Entry template
 
 ```text
-### Checkpoint / date
+### <Checkpoint ID> — <title> [Status]
+Date:
 Goal:
+Files and interfaces (when code changed):
 Environment and commands:
 Observed results:
 Mistakes / corrections:
 What this teaches about CPU/GPU/runtime/compiler behavior:
+Related: (decision or roadmap IDs)
 Next action:
 ```
