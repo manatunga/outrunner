@@ -1,201 +1,111 @@
-# Runtime Specification
+# Runtime Specification (Skeleton)
 
-**Status:** Provisional. Defines behavioral targets for the v0.1 runtime. No stable public runtime API is implemented.
+**Status:** Skeleton, 2026-11-22. Records decided points and lists open ones. The runtime milestones (OR-M2 to OR-M5) fill it in.
+**Related:** `DESIGN_DECISIONS.md` (D-022 to D-033), `ARCHITECTURE.md`, `LANGUAGE_SPEC.md`.
 
-## 1. Purpose
+**Section status:** *Decided*, *Proposed* (recommendation awaiting confirmation), *Open*.
 
-The Outrunner runtime is responsible for executing compiled or loaded kernels on supported execution backends.
+## 1. Objects and ownership — Decided
 
-It provides a shared host-facing interface for device selection, memory management, kernel loading, dispatch, synchronization, and diagnostics.
+Objects: Runtime, Device, Stream, Event, Buffer<T>, Module, Kernel, specialization handles (D-031).
+- Handles are move-only and release their resources when destroyed (D-029).
+- A Runtime owns device enumeration, the tuning-cache location, logging configuration and the loaded Vulkan library. There is no hidden global context; `default_runtime()` is a convenience over an explicit object.
+- **Open:** exact ownership relations between Module, Kernel and specialization handles.
 
-The runtime should allow a host application to select an execution backend without requiring a separate kernel implementation for each backend.
+## 2. Devices and capabilities — Decided (model), Open (fields)
 
-The initial target is a CPU execution backend and one compatible Vulkan GPU backend.
+- The CPU is a device in the same list as GPUs (D-022).
+- Each device has a **capability descriptor** separating what the driver *advertises* from what Outrunner has *verified* (D-033). A capability counts only after a correctness check and micro-benchmark, cached (D-022).
+- Candidate fields (**Open**): vendor, name, driver and API versions, shared-memory size, subgroup size range, per-dimension block and grid limits, push-constant size, `bufferDeviceAddress`, atomic capabilities (64-bit, float), memory-model support, cooperative-matrix support, whether memory is shared with the host.
+- Selection order: user choice, then default heuristic, then a fallback ladder (verified native fast path, Vulkan baseline, CPU).
+- **Baseline requirement — Proposed:** a GPU qualifies for the Vulkan baseline only if it provides `bufferDeviceAddress`. The remaining minimum feature set is **Open** and depends on the pending `vulkaninfo` check (`ROADMAP.md`, v0.3).
 
-## 2. Core conceptual objects
+## 3. Memory — Decided
 
-These objects describe the responsibilities of the runtime. They do not establish final C++ classes, ownership rules, or public API signatures.
+- Memory kinds: device, host, managed; CPU memory is 64-byte aligned (D-023, D-024).
+- Allocation goes through Outrunner's own sub-allocator behind an interface; users never see raw driver allocations.
+- Device pointers are typed handles carrying device, kind and size, converting explicitly to raw addresses when passed to kernels.
+- Copies are skipped automatically on devices that share memory with the host; a query reports sharing.
+- Staging for discrete GPUs is internal.
+- Freed memory is reused only after all work submitted so far on that device completes (D-029).
+- **Open:** allocation alignment options, zero-size allocations, behavior when memory is exhausted beyond the error category, managed-memory migration policy.
 
-### 2.1 Device
+## 4. Streams and events — Decided
 
-Identifies an available execution device and its capabilities.
+- A stream is an in-order queue; work in one stream runs in order; different streams may overlap (D-025).
+- Each device has a simple default stream with no implicit synchronization with other streams.
+- Streams are deferred command lists: work is recorded and submitted in batches, at synchronization points, on size thresholds or on explicit flush.
+- Dependent launches in one stream are separated by conservative full barriers; the barrier policy is pluggable (D-026).
+- Events provide cross-stream ordering and timestamps.
+- **Open:** the precise batching thresholds, flush rules and event-wait semantics across devices.
 
-Candidate device types:
+## 5. Launch and dispatch — Decided
 
-- CPU reference/execution device.
-- Compatible Vulkan compute device.
+- A launch is a function call taking a kernel, grid, block, stream and arguments (D-027).
+- Configurations are validated eagerly against device limits; errors return immediately.
+- Block size, shared-memory size and tuning parameters are specialization parameters selecting cached pipeline variants, with explicit specialization handles, prewarming and shared-memory size classes.
+- Oversized grids are split transparently; kernels marked as inter-block dependent return an error instead.
+- Arguments are passed through small constants where they fit and through a runtime-packed buffer otherwise.
+- **Open:** argument-packing layout, limits on argument size, behavior when specialization creation fails mid-stream.
 
-The runtime must expose enough information for callers to identify and select an available device.
+## 6. Errors — Decided (model), Open (codes)
 
-### 2.2 Buffer
+- Code-based C core and a `Result` type; the C++ wrapper throws by default with a `Result` variant (D-028).
+- Categories: invalid argument, out of memory, unsupported feature, kernel compile error (with source locations), device lost, verification failure.
+- Device-side errors surface at synchronization points.
+- A lost device is marked invalid, its pending work fails, and it can be recreated.
+- **Open:** the numeric error codes and the structure carrying details and locations.
 
-Represents a region of memory used by compute operations.
+## 7. Threading — Decided
 
-A buffer has:
+Devices and the allocator are thread-safe. A stream shared between threads needs external synchronization (D-029).
+**Open:** thread-safety of Module and Kernel creation, and of the tuning cache.
 
-- A defined size.
-- A defined lifetime.
-- An associated memory location or allocation.
-- Defined rules for host and device access.
+## 8. Tuning, caching and verification — Decided (design), Open (details)
 
-Whether buffers are owned, referenced, or device-bound remains undecided.
+- Autotuning searches tunable parameters per device; results go to a persistent cache keyed by kernel IR hash, device identity, driver version, parameters and compiler version (D-016, D-017).
+- Every candidate and every newly trusted capability is checked against the oracles by the correctness harness (D-022, D-036).
+- **Open:** cache file format, concurrency between processes, invalidation and eviction, and user-controlled tuning budgets.
 
-### 2.3 Kernel
+## 9. Diagnostics — Decided
 
-Represents a compiled or loaded compute operation.
+Event timestamps and a timing helper; a callback-based logger with levels; an "explain" trace; Chrome trace export; off by default with near-zero cost when disabled (D-033).
+**Open:** the logger callback signature and the explain-trace record format.
 
-It must provide enough metadata for the runtime to validate its arguments and configure execution.
+## 10. C ABI conventions — Proposed
 
-The runtime should not require the host application to manage backend-specific kernel representations directly.
+- Prefix `outrunner_`, snake_case (D-031); opaque handles; every function returns an error code and writes outputs through pointers.
+- Size-prefixed structs: new fields are only appended, and the library reads the size to know the caller's version (D-032).
+- API version negotiation at runtime creation; an experimental namespace for incubating features.
+- No function in the stable surface throws or unwinds across the ABI boundary.
+- Illustrative, not final:
 
-### 2.4 Dispatch
+```text
+outrunner_result outrunner_runtime_create(const outrunner_runtime_desc* desc,
+                                          outrunner_runtime* out_runtime);
+```
 
-Submits a kernel for execution over an explicit logical work range.
+## 11. C++ wrapper conventions — Proposed
 
-The runtime must define how dispatch dimensions map to logical work-item indices and ensure consistent mapping across supported backends.
+Header-only; PascalCase types, snake_case functions, namespace `outrunner` (never `or`); typed `Buffer<T>`; exceptions by default, with a `Result`-returning variant (D-028, D-031). Illustrative, not final:
 
-### 2.5 Synchronization
+```text
+auto dev = outrunner::Device::best();
+auto stream = dev.default_stream();
+auto a = dev.alloc<float>(n);
+a.upload(host_a, stream);
+stream.launch(add, grid_for(n, 256), 256, a, b, c, n);
+stream.synchronize();
+```
 
-Provides a way to establish when submitted work and required memory transfers have completed.
+## 12. Backend interface (internal) — Proposed
 
-The host must have a reliable completion point before reading results that depend on dispatched work.
+The runtime depends on backends through one internal interface, which a backend implements. It must cover: device and capability discovery; memory allocation, free and copy; creating an executable pipeline from IR plus specialization parameters; recording a launch and a barrier; submitting and waiting; timestamps; and fault reporting. The CPU and Vulkan backends are the first two implementations. **Open:** the exact interface, settled at OR-M2 and OR-M4.
 
-## 3. Required v0.1 behavior
+## 13. Versioning — Decided
 
-### 3.1 Device discovery
+Semantic versioning; no stability promises in 0.x; the C ABI is stable within a major version from v1.0.0 (D-032). The serialized IR is versioned: newer readers accept older IR; older readers reject newer IR with a clear error.
 
-- Enumerate the CPU execution device.
-- Enumerate available compatible Vulkan compute devices.
-- Report unavailable or unsupported backends clearly.
-- Expose relevant device capabilities needed for selection and dispatch validation.
+## 14. Open items summary
 
-### 3.2 Device selection
-
-- Allow the caller to explicitly select a device or backend.
-- Avoid requiring different kernel source for CPU and GPU execution.
-- Report selection failures through a defined error mechanism.
-
-### 3.3 Memory allocation
-
-- Allocate and release compute buffers.
-- Track buffer sizes and relevant ownership/lifetime information.
-- Reject invalid allocation sizes and unsupported uses with defined errors.
-
-### 3.4 Data transfer
-
-- Support host-to-compute and compute-to-host transfers.
-- Handle GPU transfers where host and device memory are distinct.
-- Allow the CPU path to use host-accessible memory.
-- Ensure required transfers are complete before dependent operations access their data.
-
-### 3.5 Kernel loading
-
-- Load or receive a kernel representation suitable for the selected backend.
-- Validate kernel compatibility with the selected device.
-- Report compilation or loading failures clearly.
-
-The exact division of responsibility between the compiler and runtime remains subject to the compiler and runtime architecture.
-
-### 3.6 Dispatch
-
-- Execute a kernel over an explicit logical work range.
-- Validate dispatch dimensions against backend/device limits.
-- Preserve the defined logical index mapping across supported backends.
-- Ensure that kernel arguments and buffers are valid for the selected execution.
-
-### 3.7 Synchronization
-
-- Provide a reliable completion point before dependent host-side reads.
-- Ensure memory transfers and dispatch operations obey the required ordering.
-- Keep the initial synchronization model simple.
-
-Advanced asynchronous execution features are deferred.
-
-### 3.8 Validation and errors
-
-The runtime should detect and report obvious invalid operations, including:
-
-- Invalid or unavailable device selection.
-- Invalid buffer references.
-- Invalid kernel references.
-- Unsupported dispatch dimensions.
-- Incompatible kernel arguments.
-- Allocation, transfer, loading, or execution failures.
-
-Errors must be actionable and distinguishable enough for host applications to respond appropriately.
-
-The final error representation remains undecided.
-
-### 3.9 Diagnostics
-
-The runtime should expose useful execution information, including:
-
-- Selected device and backend.
-- Kernel compilation or loading stages.
-- Dispatch dimensions.
-- Execution failures.
-- Basic timing information.
-
-CPU wall-clock measurements and GPU timing mechanisms must be distinguished. Timing results should not imply directly comparable measurements when their measurement methods differ.
-
-## 4. Execution semantics requiring decisions
-
-The following details must be resolved before the relevant runtime interfaces are finalized.
-
-1. **Buffer ownership:** whether buffers are runtime-owned, caller-owned, or support both models.
-2. **Device association:** whether buffers are tied to a device or can be transferred/shared between devices.
-3. **Synchronization:** whether v0.1 dispatch is synchronous or exposes explicit completion handles.
-4. **Dispatch dimensions:** workgroup dimensions, device limits, and global-index mapping.
-5. **Memory safety:** bounds checking, aliasing, and buffer access guarantees.
-6. **Error model:** exceptions, result values, or status codes.
-7. **Kernel representation:** how compiled kernel metadata and backend-specific artifacts are provided to the runtime.
-8. **Floating-point behavior:** acceptable numerical differences between CPU and GPU execution.
-
-These are open design decisions, not existing API guarantees.
-
-## 5. Current implementation boundary
-
-The current `outrunner_cpu` library provides sequential reference functions for vector addition and matrix multiplication.
-
-These functions:
-
-- Operate directly on caller-provided host-accessible buffers.
-- Execute sequentially.
-- Do not discover or select devices.
-- Do not allocate or manage compute buffers.
-- Do not load compiled kernels.
-- Do not provide logical work-item dispatch.
-- Do not implement runtime synchronization.
-
-They are computational reference implementations, not the completed CPU runtime backend described by this specification.
-
-The runtime and execution backend milestones will introduce these capabilities incrementally.
-
-## 6. Non-goals for v0.1
-
-The initial runtime does not aim to provide:
-
-- CUDA binary compatibility.
-- GPU driver replacement.
-- Multi-GPU scheduling.
-- Unified virtual memory.
-- An advanced stream/event execution model.
-- A production-grade optimizing compiler.
-- A complete neural-network framework.
-
-These exclusions keep the first implementation focused on a small, testable end-to-end compute system.
-
-## 7. v0.1 acceptance tests
-
-The runtime is accepted for v0.1 when the following can be demonstrated:
-
-1. The same host application can select and use the CPU and compatible Vulkan GPU backends.
-2. The application can allocate buffers, transfer data, load kernels, dispatch work, and retrieve results.
-3. Vector addition, matrix multiplication, and a simple element-wise operation produce correct results.
-4. CPU and GPU execution use the same kernel definition and documented logical indexing semantics.
-5. Invalid inputs and unsupported operations produce useful errors.
-6. Device information and dispatch configuration can be inspected.
-7. Basic execution timings can be collected, with CPU and GPU measurement methods clearly identified.
-8. GPU numerical results are compared with the CPU reference using justified floating-point tolerances.
-
-Acceptance must be demonstrated on actual supported hardware. A successful CPU implementation alone does not establish Vulkan backend support or cross-vendor portability.
+Object ownership details; capability descriptor fields and the baseline feature set; allocation options and exhaustion behavior; batching and flush rules; argument packing; error codes and detail structure; thread-safety of module creation and the cache; cache format and invalidation; logger and trace formats; the exact backend interface.
