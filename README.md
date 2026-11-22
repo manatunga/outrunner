@@ -75,7 +75,7 @@ Some directories appear as their components land.
 - [Benchmarking methodology](docs/BENCHMARKING.md)
 - [Clean-room policy](docs/CLEAN_ROOM.md)
 - [Learning log](docs/LEARNING_LOG.md)
-- Kernel language and runtime specifications: [Language specification](docs/LANGUAGE_SPEC.md), [Runtime specification]docs/RUNTIME_SPEC.md
+- Kernel language and runtime specifications: [Language specification](docs/LANGUAGE_SPEC.md), [Runtime specification](docs/RUNTIME_SPEC.md)
 
 ## Contributing
 
