@@ -20,7 +20,8 @@
 | OR-M1.1 | Reusable vector addition, `std::size_t` indexing | Complete |
 | OR-M1.2 | CMake project, `outrunner_cpu` library, vector-add tests, CTest | Complete |
 | OR-M1.3 | Sequential row-major matrix multiplication and tests | Complete |
-| OR-M1.4 | Final review and documentation of the foundation | In progress |
+| OR-M1.4 | Complete test integration of both reference kernels | Complete |
+| OR-M1.5 | Final review and milestone completion | In progress |
 
 These hand-written kernels become the independent reference implementations (second oracle, D-036).
 
