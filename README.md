@@ -35,7 +35,7 @@ The public API is a stable C interface with a header-only C++ wrapper. Details: 
 
 ## Current status
 
-- **Done:** the CPU reference foundation: vector addition and matrix multiplication with correctness tests, a CMake build and CTest integration (`OR-E1`, `OR-M1.1` to `OR-M1.3`). These become the independent reference implementations that every backend is checked against. final review and documentation of that foundation (`OR-M1.4`).
+- **Done:** the CPU reference foundation: vector addition and matrix multiplication with correctness tests, a CMake build and CTest integration (`OR-E1`, `OR-M1.1` to `OR-M1.3`). These become the independent reference implementations that every backend is checked against. Final review and documentation of that foundation (`OR-M1.4`).
 - **In progress:** Final review and milestone completion (OR-M1.5).
 - **Next:** four risk-first spikes (Vulkan matmul ceiling, cooperative-matrix behavior, AsmJit prototype, software Vulkan check), then the v0.1 walking skeleton. See `docs/ROADMAP.md`.
 - **Not yet implemented:** the kernel language, compiler, runtime API, CPU JIT backend and Vulkan backend.
@@ -75,7 +75,7 @@ Some directories appear as their components land.
 - [Benchmarking methodology](docs/BENCHMARKING.md)
 - [Clean-room policy](docs/CLEAN_ROOM.md)
 - [Learning log](docs/LEARNING_LOG.md)
-- Kernel language and runtime specifications: planned (`docs/LANGUAGE_SPEC.md`, `docs/RUNTIME_SPEC.md`)
+- Kernel language and runtime specifications: [Language specification](docs/LANGUAGE_SPEC.md), [Runtime specification]docs/RUNTIME_SPEC.md
 
 ## Contributing
 
