@@ -26,7 +26,7 @@
 | maxComputeWorkGroupCount                      | 65535 / 65535 / 65535                  | 2147483647 / 65535 / 65535 | not recorded          | launch limits |
 | maxComputeWorkGroupSize                       | 1024 / 1024 / 1024                     | 1024 / 1024 / 1024         | not recorded          | launch limits |
 | maxPushConstantsSize                          | 256                                    | 256                        | not recorded          | D-027         |
-| cooperative matrix                            | extension listed, feature not recorded | none                       | not recorded          | D-020         |
+| cooperative matrix                            | extension listed, feature not recorded | none                       | not exposed           | D-020         |
 | apiVersion                                    | 1.4.354                                | 1.4.354                    | 1.4.359               |               |
 | driverName                                    | llvmpipe                               | Intel Mesa                 | Intel 32.0.101.9150   |               |
 | MesaVersion                                   | 26.2.6                                 | 26.2.6                     | -                     |               |
