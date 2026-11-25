@@ -63,6 +63,7 @@ Record experiments, commands, observed output, corrections, and the direct impli
 **Goal:** Turn the experiment into a reusable CPU kernel with a public interface.
 
 **Files and interfaces:**
+
 - `include/outrunner/cpu/vector_add.hpp`
 - `src/cpu/vector_add.cpp`
 - `outrunner::cpu::add_vector(const float*, const float*, float*, std::size_t)`
@@ -86,10 +87,12 @@ Record experiments, commands, observed output, corrections, and the direct impli
 **Goal:** Establish a reproducible build and correctness tests for vector addition.
 
 **Files and interfaces:**
+
 - `CMakeLists.txt`
 - `tests/test_vector_add.cpp`
 
 **Environment and commands:**
+
 - C++20 required; `outrunner_cpu` static library; independent `test_vector_add` executable; CTest registration.
 
 ```bash
@@ -115,6 +118,7 @@ ctest --test-dir build --output-on-failure
 **Goal:** Add a second reference kernel: sequential row-major matrix multiplication.
 
 **Files and interfaces:**
+
 - `include/outrunner/cpu/matmul.hpp`
 - `src/cpu/matmul.cpp`
 - `tests/test_matmul.cpp`
@@ -127,6 +131,7 @@ ctest --test-dir build --output-on-failure
 **Mistakes / corrections:** None recorded.
 
 **What this teaches about CPU/GPU/runtime/compiler behavior:**
+
 - Compatible matrix dimensions: A is `m × k`, B is `k × n`, and output is `m × n`.
 - Row-major indexing for accessing matrix elements.
 - Dot products between rows of A and columns of B.
@@ -183,6 +188,7 @@ Test project /home/manatunga/projects/outrunner/build
 **Observed results:** Pending.
 
 **Remaining work:**
+
 - Review final source and test changes.
 - Complete documentation updates.
 - Perform clean build and final verification.
@@ -195,6 +201,56 @@ Test project /home/manatunga/projects/outrunner/build
 **Related:** D-036.
 
 **Next action:** Close M1, then begin spikes S4, S2, S1 and S3 (`ROADMAP.md`).
+
+## S4 — Lavapipe and Intel Mesa feature check [Complete for lavapipe and Intel Mesa on Fedora; desktop drivers pending]
+
+**Date:** 2026-11-24/25 (confirm)
+
+**Goal:** Find out whether Mesa's lavapipe (software Vulkan) exposes the features Outrunner's Vulkan baseline needs, so CI can cover the Vulkan path without a GPU, and compare it with the real Intel GPU under Mesa.
+
+**Files and interfaces:**
+
+- `experiments/vulkan/s4_lavapipe/README.md` (full results table)
+- `experiments/vulkan/s4_lavapipe/vulkaninfo_full_lvp.txt`
+- `experiments/vulkan/s4_lavapipe/vulkaninfo_full_intel.txt`
+
+**Environment and commands:** Fedora 45 on the laptop. Mesa 26.2.6, Vulkan API 1.4.354. Devices: lavapipe (llvmpipe) and Intel(R) Graphics (MTL), Intel open-source Mesa driver.
+
+```bash
+sudo dnf install mesa-vulkan-drivers vulkan-tools
+vulkaninfo --summary
+ls /usr/share/vulkan/icd.d/
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/<icd json> vulkaninfo > vulkaninfo_full_<name>.txt
+grep -n -A4 "maxComputeWorkGroupCount" vulkaninfo_full_<name>.txt
+```
+
+**Observed results:** The three gate features (buffer device address, 64-bit integers, timeline semaphores) are true on both. Key differences:
+
+| Feature or limit                 | lavapipe                               | Intel, Mesa                |
+| -------------------------------- | -------------------------------------- | -------------------------- |
+| Shared-memory Int64 atomics      | true                                   | false                      |
+| Shared-memory float32 atomic add | true                                   | false                      |
+| Subgroup size                    | 8-8                                    | 8-32                       |
+| Shared memory                    | 32 KiB                                 | 48 KiB                     |
+| Work group count (x/y/z)         | 65535 / 65535 / 65535                  | 2147483647 / 65535 / 65535 |
+| Cooperative matrix               | extension listed, feature not recorded | none                       |
+
+The Windows Intel driver agreed with Intel Mesa on buffer device address, subgroup range and shared memory, and did not expose cooperative matrix. Its other values were not recorded.
+
+**Mistakes / corrections:** The first run of the work-group rows recorded `3`, which was the array length printed by `vulkaninfo`, not the limits; the real values are on the lines below (`grep -A4`).
+
+**What surprised me:** The asymmetry of the grid limits: the x dimension allows over two billion work groups on Intel Mesa, while y and z allow only 65535.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:**
+
+- Lavapipe provides the gate features, so a software Vulkan driver can exercise the baseline's pointer model and stream ordering in CI.
+- Capabilities differ between drivers even for the same operations: shared-memory 64-bit and float atomic add are true on lavapipe and false on the real Intel GPU. A passing lavapipe run cannot stand in for a real-device run, which is why the capability descriptor and flagged fallbacks (D-012) are needed.
+- Grid limits are per dimension and asymmetric, so grid splitting (D-027) must be per dimension, and block size is limited both per dimension and in total invocations.
+- Lavapipe's fixed subgroup width of 8 and 32 KiB shared memory make it a free check that code assumes neither a particular subgroup width nor more than 32 KiB.
+
+**Related:** D-012, D-019, D-025, D-027, D-037; `ROADMAP.md` spike S4.
+
+**Next action:** Recheck the cooperative-matrix cells; repeat on the desktop drivers and on the laptop's Windows drivers; recheck lavapipe on the CI runner's Mesa version when CI exists; then start S2.
 
 ## Entry template
 
