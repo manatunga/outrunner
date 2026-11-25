@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/branding/readme-banner.png" alt="Outrunner Banner" width="100%">
+</p>
+
 # Outrunner
 
 **Status:** Experimental, pre-v0.1 · **Language:** C++20 · **License:** Apache-2.0
