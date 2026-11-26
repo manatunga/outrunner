@@ -5,7 +5,8 @@
 /// future parallel CPU and GPU implementations can be tested.
 #include "outrunner/cpu/vector_add.hpp"
 
-namespace outrunner::cpu {
+namespace outrunner::cpu
+{
 
     /// @brief Implements the sequential CPU vector-addition operation.
     ///
@@ -16,12 +17,13 @@ namespace outrunner::cpu {
     ///
     /// @see outrunner::cpu::add_vector
     void add_vector(
-        const float* a,
-        const float* b,
-        float* output,
-        std::size_t count
-    ) {
-        for (std::size_t i = 0; i < count; i++) {
+        const float *a,
+        const float *b,
+        float *output,
+        std::size_t count)
+    {
+        for (std::size_t i = 0; i < count; i++)
+        {
             output[i] = a[i] + b[i];
         }
     }

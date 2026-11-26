@@ -6,7 +6,8 @@
 /// cache blocking, SIMD vectorization, and multithreaded execution.
 #include "outrunner/cpu/matmul.hpp"
 
-namespace outrunner::cpu {
+namespace outrunner::cpu
+{
 
     /// @brief Implements sequential multiplication of two floating-point matrices.
     ///
@@ -27,18 +28,21 @@ namespace outrunner::cpu {
     ///
     /// @see outrunner::cpu::matmul
     void matmul(
-        const float* a,
-        const float* b,
-        float* output,
+        const float *a,
+        const float *b,
+        float *output,
         std::size_t m,
         std::size_t k,
-        std::size_t n
-    ) {
-        for (std::size_t i = 0; i < m; i++) {
-            for (std::size_t j = 0; j < n; j++) {
+        std::size_t n)
+    {
+        for (std::size_t i = 0; i < m; i++)
+        {
+            for (std::size_t j = 0; j < n; j++)
+            {
                 float sum{0.0f};
 
-                for (std::size_t p = 0; p < k; p++) {
+                for (std::size_t p = 0; p < k; p++)
+                {
                     sum += a[i * k + p] * b[p * n + j];
                 }
 

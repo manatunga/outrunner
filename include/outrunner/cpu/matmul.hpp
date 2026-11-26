@@ -13,7 +13,8 @@
 
 #include <cstddef>
 
-namespace outrunner::cpu {
+namespace outrunner::cpu
+{
 
     /// @brief Multiplies two row-major floating-point matrices.
     ///
@@ -49,12 +50,11 @@ namespace outrunner::cpu {
     /// @note If k is zero, every element of a non-empty output matrix
     ///     is assigned 0.0f.
     void matmul(
-        const float* a,
-        const float* b,
-        float* output,
+        const float *a,
+        const float *b,
+        float *output,
         std::size_t m,
         std::size_t k,
-        std::size_t n
-    );
+        std::size_t n);
 
 } // namespace outrunner::cpu

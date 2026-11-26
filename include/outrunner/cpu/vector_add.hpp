@@ -7,7 +7,8 @@
 
 #include <cstddef>
 
-namespace outrunner::cpu {
+namespace outrunner::cpu
+{
 
     /// @brief Performs element-wise addition of two floating-point arrays.
     ///
@@ -38,10 +39,9 @@ namespace outrunner::cpu {
     /// @note A count of zero performs no element operations and does
     ///     not require the pointers to reference accessible elements.
     void add_vector(
-        const float* a,
-        const float* b,
-        float* output,
-        std::size_t count
-    );
+        const float *a,
+        const float *b,
+        float *output,
+        std::size_t count);
 
 } // namespace outrunner::cpu
