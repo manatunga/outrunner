@@ -1,0 +1,62 @@
+Vulkan instance version: 1.4.363
+Instance created
+Device Name: NVIDIA GeForce RTX 5070
+Device Type: discrete
+Vendor ID: 0x10de
+Device Vulkan version: 1.4.341
+  VK_KHR_cooperative_matrix: advertised (spec version 2)
+  VK_NV_cooperative_matrix: advertised (spec version 1)
+  VK_NV_cooperative_matrix2: advertised (spec version 1)
+  Querying cooperative-matrix features...
+  cooperativeMatrix: true
+  cooperativeMatrixRobustBufferAccess: false
+  cooperativeMatrixWorkgroupScope: true
+  cooperativeMatrixFlexibleDimensions: true
+  cooperativeMatrixReductions: true
+  cooperativeMatrixConversions: true
+  cooperativeMatrixPerElementOperations: true
+  cooperativeMatrixTensorAddressing: true
+  cooperativeMatrixBlockLoads: true
+  Querying cooperative-matrix property count...
+  Querying cooperative-matrix properties...
+  Supported cooperative matrix shapes (15):
+    16x16x16 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x8x16 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x8x8 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x16x16 | A=float16, B=float16, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x8x16 | A=float16, B=float16, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x8x8 | A=float16, B=float16, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x16x32 | A=uint8, B=uint8, C=uint32, D=uint32 | scope=subgroup | saturating=false
+    16x16x32 | A=int8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x8x32 | A=uint8, B=uint8, C=uint32, D=uint32 | scope=subgroup | saturating=false
+    16x8x32 | A=int8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x16x16 | A=bfloat16, B=bfloat16, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x16x32 | A=float8_e5m2, B=float8_e5m2, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x16x32 | A=float8_e5m2, B=float8_e5m2, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x16x32 | A=float8_e4m3, B=float8_e4m3, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x16x32 | A=float8_e4m3, B=float8_e4m3, C=float32, D=float32 | scope=subgroup | saturating=false
+Device Name: AMD Radeon(TM) Graphics
+Device Type: integrated
+Vendor ID: 0x1002
+Device Vulkan version: 1.4.315
+  VK_KHR_cooperative_matrix: advertised (spec version 2)
+  VK_NV_cooperative_matrix: not advertised
+  VK_NV_cooperative_matrix2: not advertised
+  Querying cooperative-matrix features...
+  cooperativeMatrix: true
+  cooperativeMatrixRobustBufferAccess: true
+  Skipping VK_NV_cooperative_matrix2 feature query (not advertised)
+  Querying cooperative-matrix property count...
+  Querying cooperative-matrix properties...
+  Supported cooperative matrix shapes (11):
+    16x16x16 | A=float16, B=float16, C=float32, D=float32 | scope=subgroup | saturating=false
+    16x16x16 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=false
+    16x16x16 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=true
+    16x16x16 | A=uint8, B=uint8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x16x16 | A=uint8, B=uint8, C=int32, D=int32 | scope=subgroup | saturating=true
+    16x16x16 | A=uint8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x16x16 | A=uint8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=true
+    16x16x16 | A=int8, B=uint8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x16x16 | A=int8, B=uint8, C=int32, D=int32 | scope=subgroup | saturating=true
+    16x16x16 | A=int8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=false
+    16x16x16 | A=int8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=true
