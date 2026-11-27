@@ -252,6 +252,46 @@ The Windows Intel driver agreed with Intel Mesa on buffer device address, subgro
 
 **Next action:** Recheck the cooperative-matrix cells; repeat on the desktop drivers and on the laptop's Windows drivers; recheck lavapipe on the CI runner's Mesa version when CI exists; then start S2.
 
+## S2 — Cooperative-matrix query on the RTX 5070 and AMD iGPU [Complete]
+
+**Date:** 2026-11-26/27 (confirm)
+
+**Goal:** Find out what the RTX 5070 driver reports for cooperative-matrix support, whether the queries behave, and compare with the AMD integrated GPU.
+
+**Files and interfaces:**
+
+- `experiments/vulkan/s2_coopmat/CMakeLists.txt`, `main.cpp`, `README.md`
+- `experiments/vulkan/s2_coopmat/results_desktop.txt`
+
+**Environment and commands:** Windows desktop, MSVC 19.44, CMake 4.4.4, Vulkan SDK 1.4.363, NVIDIA driver 610.88, AMD driver 25.10.30.02.
+
+```powershell
+cmake -S experiments\vulkan\s2_coopmat -B build-s2
+cmake --build build-s2 --config Release
+.\build-s2\Release\s2_coopmat.exe
+```
+
+**Observed results:**
+
+- RTX 5070: `VK_KHR_cooperative_matrix` (spec 2), `VK_NV_cooperative_matrix` (1) and `VK_NV_cooperative_matrix2` (1) advertised; all feature flags true; 15 subgroup-scope shapes covering fp16, bf16, int8/uint8 and fp8 inputs. No fp32 inputs. No crash in the property query.
+- AMD iGPU: KHR only; 11 shapes, all 16x16x16 (fp16 and int8 variants, some saturating).
+
+**Mistakes / corrections:** An intermediate draft lost the assignment to `enabledLayerCount` (a bare `static_cast` statement remained), which would have left the validation layer silently off. Fixed. Review fixes also added a missing `#include <string>`, continuing past a failing device, and logging before risky calls.
+
+**What I learned:** A very detailed hands-on dive into Vulkan instances, enumeration and queries, and the cooperative-matrix data on the GPUs in my setup.
+
+**What surprised me:** Pretty much regarding the supported cooperative matrix sizes across the different GPUs, and how they differ from device to device.
+
+**What this teaches about CPU/GPU/runtime/compiler behavior:**
+
+- Matrix hardware through Vulkan on this GPU needs reduced-precision inputs, so a "matrix-assisted" float32 workload would be a different numeric mode and must be reported as its own tier (D-020).
+- The AMD iGPU advertises the extension, but a 2-CU RDNA 2 part probably has no matrix hardware, so advertised does not mean useful; verify-before-trust needs a micro-benchmark (D-022).
+- Property queries returned cleanly on driver 610.88; the defensive-logging pattern is still worth keeping.
+
+**Related:** D-020, D-022; `ROADMAP.md` spike S2.
+
+**Next action:** Spike S1, the Vulkan matmul ceiling.
+
 ## Entry template
 
 ```text
