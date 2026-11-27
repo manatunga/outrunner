@@ -1,0 +1,34 @@
+Vulkan instance version: 1.4.350
+Instance created
+Device Name: Intel(R) Graphics (MTL)
+Device Type: integrated
+Vendor ID: 0x8086
+Device Vulkan version: 1.4.354
+  VK_KHR_cooperative_matrix: not advertised
+  VK_NV_cooperative_matrix: not advertised
+  VK_NV_cooperative_matrix2: not advertised
+  Skipping cooperative-matrix feature query (VK_KHR_cooperative_matrix not advertised)
+Device Name: llvmpipe (LLVM 23.1.2, 256 bits)
+Device Type: cpu
+Vendor ID: 0x10005
+Device Vulkan version: 1.4.354
+  VK_KHR_cooperative_matrix: advertised (spec version 2)
+  VK_NV_cooperative_matrix: not advertised
+  VK_NV_cooperative_matrix2: advertised (spec version 1)
+  Querying cooperative-matrix features...
+  cooperativeMatrix: true
+  cooperativeMatrixRobustBufferAccess: true
+  cooperativeMatrixWorkgroupScope: false
+  cooperativeMatrixFlexibleDimensions: true
+  cooperativeMatrixReductions: true
+  cooperativeMatrixConversions: true
+  cooperativeMatrixPerElementOperations: true
+  cooperativeMatrixTensorAddressing: false
+  cooperativeMatrixBlockLoads: false
+  Querying cooperative-matrix property count...
+  Querying cooperative-matrix properties...
+  Supported cooperative matrix shapes (4):
+    8x8x8 | A=float16, B=float16, C=float16, D=float16 | scope=subgroup | saturating=false
+    8x8x8 | A=float16, B=float16, C=float32, D=float32 | scope=subgroup | saturating=false
+    8x8x8 | A=uint8, B=uint8, C=uint32, D=uint32 | scope=subgroup | saturating=false
+    8x8x8 | A=int8, B=int8, C=int32, D=int32 | scope=subgroup | saturating=false
