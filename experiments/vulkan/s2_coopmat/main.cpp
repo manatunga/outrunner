@@ -87,7 +87,7 @@ std::string componentTypeToString(VkComponentTypeKHR componentType)
         return "float8_e4m3";
     case VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT:
         return "float8_e5m2";
-#if VK_HEADER_VERSION >= 338
+#if VK_HEADER_VERSION > 350
     case VK_COMPONENT_TYPE_FLOAT6_E2M3_EXT:
         return "float6_e2m3";
     case VK_COMPONENT_TYPE_FLOAT6_E3M2_EXT:
