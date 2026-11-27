@@ -1,13 +1,15 @@
 /// \file main.cpp
 /// \brief Spike S2: query cooperative-matrix support through Vulkan.
 ///
-/// Stage 4 (current): prints the Vulkan instance version, creates an
+/// Stage 5 (current): prints the Vulkan instance version, creates an
 /// instance, and lists the physical devices with their name, type, vendor ID
 /// and API version. For each device it reports whether the cooperative-matrix
-/// extensions are advertised (and their spec versions) and, when
-/// VK_KHR_cooperative_matrix is advertised, queries its feature flags via
-/// vkGetPhysicalDeviceFeatures2, then destroys the instance. Later stages
-/// query each device's supported cooperative-matrix shapes and data types.
+/// extensions are advertised (and their spec versions), queries feature flags
+/// via vkGetPhysicalDeviceFeatures2 when VK_KHR_cooperative_matrix is
+/// advertised, and queries supported cooperative-matrix shapes and data types
+/// via a dynamically loaded extension entry point when enabled, then destroys
+/// the instance. Later stages add defensive logging and optional
+/// VK_NV_cooperative_matrix2 inspection.
 ///
 /// Throwaway experiment; see docs/ROADMAP.md (S2) and D-020.
 #include <vulkan/vulkan.h>
@@ -18,6 +20,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <format>
 
 /// Converts a Vulkan physical device type enum into a human-readable label.
 ///
@@ -38,6 +41,85 @@ const char *deviceTypeToString(VkPhysicalDeviceType deviceType)
         return "cpu";
     default:
         return "other";
+    }
+}
+
+/// Converts a Vulkan cooperative-matrix component type enum into a readable
+/// label (or a fallback string with the numeric value for unknown enums).
+///
+/// \param componentType The component type reported in
+///        VkCooperativeMatrixPropertiesKHR.
+/// \return A string describing the component data type.
+std::string componentTypeToString(VkComponentTypeKHR componentType)
+{
+    switch (componentType)
+    {
+    case VK_COMPONENT_TYPE_FLOAT16_KHR:
+        return "float16";
+    case VK_COMPONENT_TYPE_FLOAT32_KHR:
+        return "float32";
+    case VK_COMPONENT_TYPE_FLOAT64_KHR:
+        return "float64";
+    case VK_COMPONENT_TYPE_SINT8_KHR:
+        return "int8";
+    case VK_COMPONENT_TYPE_SINT16_KHR:
+        return "int16";
+    case VK_COMPONENT_TYPE_SINT32_KHR:
+        return "int32";
+    case VK_COMPONENT_TYPE_SINT64_KHR:
+        return "int64";
+    case VK_COMPONENT_TYPE_UINT8_KHR:
+        return "uint8";
+    case VK_COMPONENT_TYPE_UINT16_KHR:
+        return "uint16";
+    case VK_COMPONENT_TYPE_UINT32_KHR:
+        return "uint32";
+    case VK_COMPONENT_TYPE_UINT64_KHR:
+        return "uint64";
+    case VK_COMPONENT_TYPE_BFLOAT16_KHR:
+        return "bfloat16";
+    case VK_COMPONENT_TYPE_SINT8_PACKED_NV:
+        return "int8_packed";
+    case VK_COMPONENT_TYPE_UINT8_PACKED_NV:
+        return "uint8_packed";
+    case VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT:
+        return "float8_e4m3";
+    case VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT:
+        return "float8_e5m2";
+    case VK_COMPONENT_TYPE_FLOAT6_E2M3_EXT:
+        return "float6_e2m3";
+    case VK_COMPONENT_TYPE_FLOAT6_E3M2_EXT:
+        return "float6_e3m2";
+    case VK_COMPONENT_TYPE_FLOAT4_E2M1_EXT:
+        return "float4_e2m1";
+    case VK_COMPONENT_TYPE_FLOAT8_UNSIGNED_E8M0_EXT:
+        return "float8_e8m0";
+    case VK_COMPONENT_TYPE_MXINT8_EXT:
+        return "mxint8";
+    default:
+        return std::format("unknown({})", static_cast<int>(componentType));
+    }
+}
+
+/// Converts a Vulkan execution scope enum into a human-readable label.
+///
+/// \param scope The execution scope reported in VkCooperativeMatrixPropertiesKHR.
+/// \return A null-terminated string literal ("device", "workgroup",
+///         "subgroup", "queue_family", or "unknown").
+const char *scopeToString(VkScopeKHR scope)
+{
+    switch (scope)
+    {
+    case VK_SCOPE_DEVICE_KHR:
+        return "device";
+    case VK_SCOPE_WORKGROUP_KHR:
+        return "workgroup";
+    case VK_SCOPE_SUBGROUP_KHR:
+        return "subgroup";
+    case VK_SCOPE_QUEUE_FAMILY_KHR:
+        return "queue_family";
+    default:
+        return "unknown";
     }
 }
 
@@ -62,14 +144,16 @@ std::optional<std::uint32_t> findExtensionSpecVersion(
     return std::nullopt;
 }
 
-/// Prints a physical device's properties, reports whether the target
-/// cooperative-matrix extensions are advertised along with their spec versions,
-/// and queries VK_KHR_cooperative_matrix feature flags when advertised.
+/// Prints a physical device's properties, reports cooperative-matrix extension
+/// advertisement and spec versions, queries feature flags, and enumerates
+/// supported cooperative-matrix shapes and data types when enabled.
 ///
+/// \param instance A valid VkInstance handle used to resolve extension entry
+///        points dynamically.
 /// \param device A valid VkPhysicalDevice handle.
-/// \return 0 if the device's properties, extensions, and features were queried
-///         and printed; 1 if enumerating device extensions failed.
-int inspectPhysicalDevice(VkPhysicalDevice device)
+/// \return 0 if inspection succeeded; 1 if enumerating extensions, loading
+///         the extension function, or enumerating matrix properties failed.
+int inspectPhysicalDevice(VkInstance instance, VkPhysicalDevice device)
 {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(device, &props);
@@ -141,6 +225,61 @@ int inspectPhysicalDevice(VkPhysicalDevice device)
         vkGetPhysicalDeviceFeatures2(device, &features2);
         std::cout << "  cooperativeMatrix: " << (coopFeatures.cooperativeMatrix == VK_TRUE ? "true" : "false") << '\n';
         std::cout << "  cooperativeMatrixRobustBufferAccess: " << (coopFeatures.cooperativeMatrixRobustBufferAccess == VK_TRUE ? "true" : "false") << '\n';
+
+        if (coopFeatures.cooperativeMatrix == VK_TRUE)
+        {
+            auto getCoopMatrixProps = reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+                vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+
+            if (getCoopMatrixProps == nullptr)
+            {
+                std::cerr << "Failed to load vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR for " << props.deviceName << '\n';
+                return 1;
+            }
+
+            std::uint32_t propCount{};
+
+            VkResult propCountResult = getCoopMatrixProps(device, &propCount, nullptr);
+            if (propCountResult != VK_SUCCESS)
+            {
+                std::cerr << "Failed to enumerate cooperative matrix property count for " << props.deviceName << " (VkResult: " << propCountResult << ")" << '\n';
+                return 1;
+            }
+
+            if (propCount == 0)
+            {
+                std::cout << "  No cooperative matrix properties reported" << '\n';
+            }
+            else
+            {
+                VkCooperativeMatrixPropertiesKHR defaultProp{};
+                defaultProp.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+                defaultProp.pNext = nullptr;
+                std::vector<VkCooperativeMatrixPropertiesKHR> matrixProps(propCount, defaultProp);
+
+                VkResult propResult = getCoopMatrixProps(device, &propCount, matrixProps.data());
+                if (propResult != VK_SUCCESS)
+                {
+                    std::cerr << "Failed to enumerate cooperative matrix properties for " << props.deviceName << " (VkResult: " << propResult << ")" << '\n';
+                    return 1;
+                }
+
+                matrixProps.resize(propCount);
+
+                std::cout << "  Supported cooperative matrix shapes (" << propCount << "):" << '\n';
+                for (const auto &prop : matrixProps)
+                {
+                    std::string AType = componentTypeToString(prop.AType);
+                    std::string BType = componentTypeToString(prop.BType);
+                    std::string CType = componentTypeToString(prop.CType);
+                    std::string DType = componentTypeToString(prop.ResultType);
+
+                    const char *scope = scopeToString(prop.scope);
+
+                    std::cout << "    " << prop.MSize << "x" << prop.NSize << "x" << prop.KSize << " | A=" << AType << ", B=" << BType << ", C=" << CType << ", D=" << DType << " | scope=" << scope << " | saturating=" << (prop.saturatingAccumulation == VK_TRUE ? "true" : "false") << '\n';
+                }
+            }
+        }
     }
     else
     {
@@ -186,7 +325,7 @@ int listPhysicalDevices(VkInstance instance)
 
     for (const auto &device : devices)
     {
-        int status = inspectPhysicalDevice(device);
+        int status = inspectPhysicalDevice(instance, device);
         if (status != 0)
         {
             return 1;
