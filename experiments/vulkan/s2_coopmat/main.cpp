@@ -1,10 +1,12 @@
 /// \file main.cpp
 /// \brief Spike S2: query cooperative-matrix support through Vulkan.
 ///
-/// Stage 2 (current): prints the Vulkan instance version, creates an
+/// Stage 3 (current): prints the Vulkan instance version, creates an
 /// instance, and lists the physical devices with their name, type, vendor ID
-/// and API version, then destroys the instance. Later stages query each
-/// device's cooperative-matrix extensions, features and properties.
+/// and API version. For each device it also reports whether the
+/// cooperative-matrix extensions are advertised (and their spec versions),
+/// then destroys the instance. Later stages query each device's
+/// cooperative-matrix features and properties.
 ///
 /// Throwaway experiment; see docs/ROADMAP.md (S2) and D-020.
 #include <vulkan/vulkan.h>
@@ -12,6 +14,9 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <optional>
+#include <span>
+#include <string_view>
 
 /// Converts a Vulkan physical device type enum into a human-readable label.
 ///
@@ -35,54 +40,131 @@ const char *deviceTypeToString(VkPhysicalDeviceType deviceType)
     }
 }
 
-/// Enumerates all physical devices visible to the instance and prints their
-/// name, type, hexadecimal vendor ID, and supported Vulkan API version.
+/// Searches a list of Vulkan device extensions for a matching extension name.
+///
+/// \param extensions The span of extension properties enumerated from a device.
+/// \param targetName The exact extension name to search for.
+/// \return The advertised specVersion if the extension is present; std::nullopt
+///         otherwise.
+std::optional<std::uint32_t> findExtensionSpecVersion(
+    std::span<const VkExtensionProperties> extensions,
+    std::string_view targetName) noexcept
+{
+    for (const auto &ext : extensions)
+    {
+        if (std::string_view(ext.extensionName) == targetName)
+        {
+            return ext.specVersion;
+        }
+    }
+
+    return std::nullopt;
+}
+
+/// Prints a physical device's properties and reports whether the target
+/// cooperative-matrix extensions are advertised along with their spec versions.
+///
+/// \param device A valid VkPhysicalDevice handle.
+/// \return 0 if the device's properties and extensions were queried and printed;
+///         1 if enumerating device extensions failed.
+int inspectPhysicalDevice(VkPhysicalDevice device)
+{
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(device, &props);
+
+    std::uint32_t major = VK_API_VERSION_MAJOR(props.apiVersion);
+    std::uint32_t minor = VK_API_VERSION_MINOR(props.apiVersion);
+    std::uint32_t patch = VK_API_VERSION_PATCH(props.apiVersion);
+
+    const char *type = deviceTypeToString(props.deviceType);
+
+    std::cout << "Device Name: " << props.deviceName << '\n';
+    std::cout << "Device Type: " << type << '\n';
+    std::cout << "Vendor ID: 0x" << std::hex << props.vendorID << std::dec << '\n';
+    std::cout << "Device Vulkan version: " << major << "." << minor << "." << patch << '\n';
+
+    std::uint32_t extCount{};
+
+    VkResult countResult = vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, nullptr);
+    if (countResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to enumerate device extension count for " << props.deviceName << " (VkResult: " << countResult << ")" << '\n';
+        return 1;
+    }
+
+    std::vector<VkExtensionProperties> extensions(extCount);
+
+    VkResult extResult = vkEnumerateDeviceExtensionProperties(device, nullptr, &extCount, extensions.data());
+    if (extResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to enumerate device extensions for " << props.deviceName << " (VkResult: " << extResult << ")" << '\n';
+        return 1;
+    }
+
+    extensions.resize(extCount);
+
+    constexpr std::array<const char *, 3> coopMatrixExtensions = {
+        VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
+        VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME,
+        VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME};
+
+    for (const auto &macroName : coopMatrixExtensions)
+    {
+        std::optional<std::uint32_t> specVersion = findExtensionSpecVersion(extensions, macroName);
+        if (specVersion)
+        {
+            std::cout << " " << macroName << ": advertised (spec version " << *specVersion << ")" << '\n';
+        }
+        else
+        {
+            std::cout << " " << macroName << ": not advertised" << '\n';
+        }
+    }
+
+    return 0;
+}
+
+/// Enumerates all physical devices visible to the instance and inspects each
+/// device's properties and cooperative-matrix extension support.
 ///
 /// \param instance A valid VkInstance handle.
-/// \return 0 if at least one device was enumerated and printed; 1 if device
-///         enumeration failed or zero devices were found.
+/// \return 0 if at least one device was enumerated and inspected; 1 if device
+///         enumeration failed, zero devices were found, or inspecting a device
+///         failed.
 int listPhysicalDevices(VkInstance instance)
 {
-    std::uint32_t count{};
+    std::uint32_t deviceCount{};
 
-    VkResult countResult = vkEnumeratePhysicalDevices(instance, &count, nullptr);
+    VkResult countResult = vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
     if (countResult != VK_SUCCESS)
     {
         std::cerr << "Failed to enumerate physical device count (VkResult: " << countResult << ")" << '\n';
         return 1;
     }
-    if (count == 0)
+    if (deviceCount == 0)
     {
         std::cerr << "No Vulkan physical devices found" << '\n';
         return 1;
     }
 
-    std::vector<VkPhysicalDevice> devices(count);
+    std::vector<VkPhysicalDevice> devices(deviceCount);
 
-    VkResult enumerateResult = vkEnumeratePhysicalDevices(instance, &count, devices.data());
+    VkResult enumerateResult = vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
     if (enumerateResult != VK_SUCCESS)
     {
         std::cerr << "Failed to enumerate physical devices (VkResult: " << enumerateResult << ")" << '\n';
         return 1;
     }
 
-    devices.resize(count);
+    devices.resize(deviceCount);
 
     for (const auto &device : devices)
     {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(device, &props);
-
-        std::uint32_t major = VK_API_VERSION_MAJOR(props.apiVersion);
-        std::uint32_t minor = VK_API_VERSION_MINOR(props.apiVersion);
-        std::uint32_t patch = VK_API_VERSION_PATCH(props.apiVersion);
-
-        const char *type = deviceTypeToString(props.deviceType);
-
-        std::cout << "Device Name: " << props.deviceName << '\n';
-        std::cout << "Device Type: " << type << '\n';
-        std::cout << "Vendor ID: 0x" << std::hex << props.vendorID << std::dec << '\n';
-        std::cout << "Device Vulkan version: " << major << "." << minor << "." << patch << '\n';
+        int status = inspectPhysicalDevice(device);
+        if (status != 0)
+        {
+            return 1;
+        }
     }
 
     return 0;
