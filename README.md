@@ -4,7 +4,7 @@
 
 # Outrunner
 
-**Status:** Experimental, pre-v0.1 · **Language:** C++20 · **License:** Apache-2.0
+> **Status:** Experimental, pre-v0.1 · **Language:** C++20 · **License:** Apache-2.0
 
 Outrunner is an open-source, vendor-neutral GPU compute stack: a small kernel language, a compiler and a runtime that aim to let you write a parallel kernel once and run it fast on CPUs and on GPUs from different vendors. It is inspired by the CUDA programming model, keeps the concepts that make that model approachable, and improves its ergonomics where a clearly better design exists.
 
@@ -28,11 +28,11 @@ Near-native performance is a **goal**, not a claim. No benchmark results exist y
 
 ```text
 single-source file --> source-splitting driver --> frontend --> IR
-                                                               |
-                                    runtime: devices, memory, streams, tuning
-                                       |                              |
-                                 CPU JIT backend               Vulkan backend
-                              (x86-64, AArch64)               (SPIR-V compute)
+                                                                |
+                                      runtime: devices, memory, streams, tuning
+                                        |                              |
+                                  CPU JIT backend               Vulkan backend
+                                (x86-64, AArch64)               (SPIR-V compute)
 ```
 
 The public API is a stable C interface with a header-only C++ wrapper. Details: `docs/ARCHITECTURE.md`.
