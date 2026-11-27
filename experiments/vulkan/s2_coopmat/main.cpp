@@ -1,12 +1,13 @@
 /// \file main.cpp
 /// \brief Spike S2: query cooperative-matrix support through Vulkan.
 ///
-/// Stage 3 (current): prints the Vulkan instance version, creates an
+/// Stage 4 (current): prints the Vulkan instance version, creates an
 /// instance, and lists the physical devices with their name, type, vendor ID
-/// and API version. For each device it also reports whether the
-/// cooperative-matrix extensions are advertised (and their spec versions),
-/// then destroys the instance. Later stages query each device's
-/// cooperative-matrix features and properties.
+/// and API version. For each device it reports whether the cooperative-matrix
+/// extensions are advertised (and their spec versions) and, when
+/// VK_KHR_cooperative_matrix is advertised, queries its feature flags via
+/// vkGetPhysicalDeviceFeatures2, then destroys the instance. Later stages
+/// query each device's supported cooperative-matrix shapes and data types.
 ///
 /// Throwaway experiment; see docs/ROADMAP.md (S2) and D-020.
 #include <vulkan/vulkan.h>
@@ -61,12 +62,13 @@ std::optional<std::uint32_t> findExtensionSpecVersion(
     return std::nullopt;
 }
 
-/// Prints a physical device's properties and reports whether the target
-/// cooperative-matrix extensions are advertised along with their spec versions.
+/// Prints a physical device's properties, reports whether the target
+/// cooperative-matrix extensions are advertised along with their spec versions,
+/// and queries VK_KHR_cooperative_matrix feature flags when advertised.
 ///
 /// \param device A valid VkPhysicalDevice handle.
-/// \return 0 if the device's properties and extensions were queried and printed;
-///         1 if enumerating device extensions failed.
+/// \return 0 if the device's properties, extensions, and features were queried
+///         and printed; 1 if enumerating device extensions failed.
 int inspectPhysicalDevice(VkPhysicalDevice device)
 {
     VkPhysicalDeviceProperties props{};
@@ -108,17 +110,41 @@ int inspectPhysicalDevice(VkPhysicalDevice device)
         VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME,
         VK_NV_COOPERATIVE_MATRIX_2_EXTENSION_NAME};
 
+    bool hasKhrCoopMatrix{};
     for (const auto &macroName : coopMatrixExtensions)
     {
         std::optional<std::uint32_t> specVersion = findExtensionSpecVersion(extensions, macroName);
         if (specVersion)
         {
-            std::cout << " " << macroName << ": advertised (spec version " << *specVersion << ")" << '\n';
+            std::cout << "  " << macroName << ": advertised (spec version " << *specVersion << ")" << '\n';
+            if (std::string_view(macroName) == VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)
+            {
+                hasKhrCoopMatrix = true;
+            }
         }
         else
         {
-            std::cout << " " << macroName << ": not advertised" << '\n';
+            std::cout << "  " << macroName << ": not advertised" << '\n';
         }
+    }
+
+    if (hasKhrCoopMatrix)
+    {
+        VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopFeatures{};
+        coopFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
+        coopFeatures.pNext = nullptr;
+
+        VkPhysicalDeviceFeatures2 features2{};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features2.pNext = &coopFeatures;
+
+        vkGetPhysicalDeviceFeatures2(device, &features2);
+        std::cout << "  cooperativeMatrix: " << (coopFeatures.cooperativeMatrix == VK_TRUE ? "true" : "false") << '\n';
+        std::cout << "  cooperativeMatrixRobustBufferAccess: " << (coopFeatures.cooperativeMatrixRobustBufferAccess == VK_TRUE ? "true" : "false") << '\n';
+    }
+    else
+    {
+        std::cout << "  Skipping cooperative-matrix feature query (VK_KHR_cooperative_matrix not advertised)" << '\n';
     }
 
     return 0;
