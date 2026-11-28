@@ -1,0 +1,112 @@
+#version 450
+
+#define BM 64u
+#define BN 64u
+#define BK 16u
+#define TM 8u
+#define TN 8u
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer BufferA {
+    float A[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer BufferB {
+    float B[];
+};
+
+layout(std430, set = 0, binding = 2) writeonly buffer BufferC {
+    float C[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint M;
+    uint N;
+    uint K;
+} pc;
+
+shared float tileA[BM][BK];
+shared float tileB[BK][BN];
+
+void main() {
+    uint lx = gl_LocalInvocationID.x;
+    uint ly = gl_LocalInvocationID.y;
+    uint tid = ly * 8u + lx;
+
+    uint blockRow = gl_WorkGroupID.y * BM;
+    uint blockCol = gl_WorkGroupID.x * BN;
+
+    float acc[TM][TN];
+    for (uint wm = 0u; wm < TM; ++wm) {
+        for (uint wn = 0u; wn < TN; ++wn) {
+            acc[wm][wn] = 0.0;
+        }
+    }
+
+    float regA[TM];
+    float regB[TN];
+
+    uint numTiles = (pc.K + BK - 1u) / BK;
+
+    for (uint t = 0u; t < numTiles; ++t) {
+        for (uint i = 0u; i < 16u; ++i) {
+            uint idx = tid + i * 64u;
+            uint aLocalRow = idx / BK;
+            uint aLocalCol = idx % BK;
+            uint globalRow = blockRow + aLocalRow;
+            uint globalCol = t * BK + aLocalCol;
+
+            if (globalRow < pc.M && globalCol < pc.K) {
+                tileA[aLocalRow][aLocalCol] = A[globalRow * pc.K + globalCol];
+            } else {
+                tileA[aLocalRow][aLocalCol] = 0.0;
+            }
+        }
+
+        for (uint i = 0u; i < 16u; ++i) {
+            uint idx = tid + i * 64u;
+            uint bLocalRow = idx / BN;
+            uint bLocalCol = idx % BN;
+            uint globalRow = t * BK + bLocalRow;
+            uint globalCol = blockCol + bLocalCol;
+
+            if (globalRow < pc.K && globalCol < pc.N) {
+                tileB[bLocalRow][bLocalCol] = B[globalRow * pc.N + globalCol];
+            } else {
+                tileB[bLocalRow][bLocalCol] = 0.0;
+            }
+        }
+
+        barrier();
+
+        for (uint k = 0u; k < BK; ++k) {
+            for (uint wm = 0u; wm < TM; ++wm) {
+                regA[wm] = tileA[ly * TM + wm][k];
+            }
+            for (uint wn = 0u; wn < TN; ++wn) {
+                regB[wn] = tileB[k][lx * TN + wn];
+            }
+            for (uint wm = 0u; wm < TM; ++wm) {
+                for (uint wn = 0u; wn < TN; ++wn) {
+                    acc[wm][wn] += regA[wm] * regB[wn];
+                }
+            }
+        }
+
+        barrier();
+    }
+
+    for (uint wm = 0u; wm < TM; ++wm) {
+        uint globalRow = blockRow + ly * TM + wm;
+        if (globalRow >= pc.M) {
+            continue;
+        }
+        for (uint wn = 0u; wn < TN; ++wn) {
+            uint globalCol = blockCol + lx * TN + wn;
+            if (globalCol < pc.N) {
+                C[globalRow * pc.N + globalCol] = acc[wm][wn];
+            }
+        }
+    }
+}
