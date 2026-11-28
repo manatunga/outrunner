@@ -2,19 +2,19 @@
 /// \brief Spike S1: measure how close a hand-written Vulkan compute matmul
 ///        gets to vendor-native performance on the RTX 5070.
 ///
-/// Stage V6 (current): creates an instance, picks the discrete GPU, selects a
-/// compute-capable queue family, creates a logical device and queue, allocates
-/// and populates host-visible storage buffers A, B, and C, verifies each
-/// shader variant against a double-precision CPU reference, and benchmarks
-/// GPU kernel throughput via timestamp queries across naive and
-/// shared-memory tiled shaders. Later stages add a register-blocked variant.
+/// Stage B2 (current): parses an optional matrix dimension N from the command
+/// line, allocates storage buffers A, B, and C in DEVICE_LOCAL VRAM, uploads
+/// and downloads host data via temporary host-visible staging buffers,
+/// verifies each shader variant against a double-precision CPU reference with
+/// N-scaled tolerance, and prints CSV throughput rows across naive,
+/// shared-memory tiled, and register-blocked shaders.
 ///
 /// Throwaway experiment; see docs/ROADMAP.md (S1) and D-039.
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -22,6 +22,8 @@
 #include <iostream>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 #ifndef SHADER_DIR
@@ -77,7 +79,7 @@ VkPhysicalDevice pickPhysicalDevice(VkInstance instance)
         }
     }
 
-    std::cout << "Chosen GPU: " << chosenProps.deviceName << '\n';
+    std::cerr << "Chosen GPU: " << chosenProps.deviceName << '\n';
 
     return chosen;
 }
@@ -102,7 +104,7 @@ std::vector<VkQueueFamilyProperties> getQueueFamilies(VkPhysicalDevice device)
         bool hasGraphics = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
         bool hasTransfer = (flags & VK_QUEUE_TRANSFER_BIT) != 0;
 
-        std::cout << std::boolalpha
+        std::cerr << std::boolalpha
                   << "  Queue Family " << i
                   << ": compute=" << hasCompute
                   << ", graphics=" << hasGraphics
@@ -178,20 +180,21 @@ std::optional<uint32_t> findMemoryType(
     return std::nullopt;
 }
 
-/// Creates a storage buffer, allocates compatible device memory, and binds
-/// the two together.
+/// Creates a Vulkan buffer with the requested usage and memory property flags,
+/// allocates compatible device memory, and binds them together.
 ///
 /// \param device Logical device that will own the buffer and memory.
 /// \param memProps Memory properties of the physical device.
 /// \param byteSize Requested buffer size in bytes.
-/// \param requiredFlags Required memory property flags (for example,
-///        host-visible and host-coherent).
+/// \param usageFlags Required VkBufferUsageFlagBits mask.
+/// \param requiredFlags Required VkMemoryPropertyFlagBits mask.
 /// \return Populated BufferResource on success, or an empty BufferResource
 ///         with VK_NULL_HANDLE handles on failure.
-BufferResource createStorageBuffer(
+BufferResource createBuffer(
     VkDevice device,
     const VkPhysicalDeviceMemoryProperties &memProps,
     VkDeviceSize byteSize,
+    VkBufferUsageFlags usageFlags,
     VkMemoryPropertyFlags requiredFlags)
 {
     BufferResource res{};
@@ -199,7 +202,7 @@ BufferResource createStorageBuffer(
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = byteSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bufferInfo.usage = usageFlags;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkResult bufferResult = vkCreateBuffer(device, &bufferInfo, nullptr, &res.buffer);
@@ -244,7 +247,7 @@ BufferResource createStorageBuffer(
     }
 
     res.size = byteSize;
-    std::cout << "Allocated storage buffer: " << byteSize << " bytes (memory type " << *memTypeIndex << ")" << '\n';
+    std::cerr << "Allocated storage buffer: " << byteSize << " bytes (memory type " << *memTypeIndex << ")" << '\n';
 
     return res;
 }
@@ -520,7 +523,7 @@ ComputePipelineResources createMatmulPipeline(
         return ComputePipelineResources{};
     }
 
-    std::cout << "Compute pipeline created from " << spvPath.filename().string() << '\n';
+    std::cerr << "Compute pipeline created from " << spvPath.filename().string() << '\n';
 
     return res;
 }
@@ -624,6 +627,148 @@ CommandResources createCommandResources(VkDevice device, std::uint32_t queueFami
     }
 
     return res;
+}
+
+/// Records and submits a synchronous vkCmdCopyBuffer transfer between two
+/// buffers and waits on the command fence until completion.
+///
+/// \param device Logical device that owns the fence.
+/// \param transferQueue Transfer-capable queue handle for submission.
+/// \param cmdRes Command pool, command buffer, and fence bundle.
+/// \param srcBuffer Source buffer handle.
+/// \param dstBuffer Destination buffer handle.
+/// \param byteSize Number of bytes to copy.
+/// \return true if recording, submission, and fence wait all succeeded;
+///         false otherwise.
+bool copyBuffer(
+    VkDevice device,
+    VkQueue transferQueue,
+    const CommandResources &cmdRes,
+    VkBuffer srcBuffer,
+    VkBuffer dstBuffer,
+    VkDeviceSize byteSize)
+{
+    VkResult resetResult = vkResetFences(device, 1, &cmdRes.fence);
+    if (resetResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to reset fence before buffer copy (VkResult: " << resetResult << ")" << '\n';
+        return false;
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VkResult beginResult = vkBeginCommandBuffer(cmdRes.commandBuffer, &beginInfo);
+    if (beginResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to begin command buffer for copy (VkResult: " << beginResult << ")" << '\n';
+        return false;
+    }
+
+    VkBufferCopy copyRegion{.srcOffset = 0, .dstOffset = 0, .size = byteSize};
+
+    vkCmdCopyBuffer(cmdRes.commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    VkResult endResult = vkEndCommandBuffer(cmdRes.commandBuffer);
+    if (endResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to end command buffer for copy (VkResult: " << endResult << ")" << '\n';
+        return false;
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdRes.commandBuffer;
+
+    VkResult submitResult = vkQueueSubmit(transferQueue, 1, &submitInfo, cmdRes.fence);
+    if (submitResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed to submit buffer copy (VkResult: " << submitResult << ")" << '\n';
+        return false;
+    }
+
+    VkResult waitResult = vkWaitForFences(device, 1, &cmdRes.fence, VK_TRUE, UINT64_MAX);
+    if (waitResult != VK_SUCCESS)
+    {
+        std::cerr << "Failed waiting for buffer copy fence (VkResult: " << waitResult << ")" << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+/// Uploads host memory into a DEVICE_LOCAL buffer through a temporary
+/// host-visible staging buffer.
+///
+/// \param device Logical device that owns the buffers.
+/// \param memProps Memory properties of the physical device.
+/// \param transferQueue Transfer-capable queue handle for the copy.
+/// \param cmdRes Command pool, command buffer, and fence bundle.
+/// \param dstDeviceBuf Destination DEVICE_LOCAL buffer.
+/// \param sourceData Pointer to host source bytes.
+/// \param byteSize Number of bytes to upload.
+/// \return true on success; false if staging allocation, mapping, or copy
+///         failed.
+bool uploadToDeviceBuffer(
+    VkDevice device,
+    const VkPhysicalDeviceMemoryProperties &memProps,
+    VkQueue transferQueue,
+    const CommandResources &cmdRes,
+    const BufferResource &dstDeviceBuf,
+    const void *sourceData,
+    VkDeviceSize byteSize)
+{
+    constexpr VkMemoryPropertyFlags stagingFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    BufferResource staging = createBuffer(device, memProps, byteSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, stagingFlags);
+    if (staging.buffer == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+
+    bool ok = uploadFloats(device, staging, sourceData, byteSize) && copyBuffer(device, transferQueue, cmdRes, staging.buffer, dstDeviceBuf.buffer, byteSize);
+
+    destroyBuffer(device, staging);
+
+    return ok;
+}
+
+/// Downloads data from a DEVICE_LOCAL buffer into host memory through a
+/// temporary host-visible staging buffer.
+///
+/// \param device Logical device that owns the buffers.
+/// \param memProps Memory properties of the physical device.
+/// \param transferQueue Transfer-capable queue handle for the copy.
+/// \param cmdRes Command pool, command buffer, and fence bundle.
+/// \param srcDeviceBuf Source DEVICE_LOCAL buffer.
+/// \param destData Pointer to host destination buffer.
+/// \param byteSize Number of bytes to download.
+/// \return true on success; false if staging allocation, copy, or mapping
+///         failed.
+bool downloadFromDeviceBuffer(
+    VkDevice device,
+    const VkPhysicalDeviceMemoryProperties &memProps,
+    VkQueue transferQueue,
+    const CommandResources &cmdRes,
+    const BufferResource &srcDeviceBuf,
+    void *destData,
+    VkDeviceSize byteSize)
+{
+    constexpr VkMemoryPropertyFlags stagingFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    BufferResource staging = createBuffer(device, memProps, byteSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT, stagingFlags);
+    if (staging.buffer == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+
+    bool ok = copyBuffer(device, transferQueue, cmdRes, srcDeviceBuf.buffer, staging.buffer, byteSize) && downloadFloats(device, staging, destData, byteSize);
+
+    destroyBuffer(device, staging);
+
+    return ok;
 }
 
 /// Records a compute matmul dispatch into the command buffer, submits it to
@@ -732,15 +877,66 @@ std::vector<float> cpuMatmulReference(std::span<const float> A, std::span<const 
     return refC;
 }
 
+/// Parses an optional positive matrix dimension N from command-line arguments,
+/// defaulting to 1024 when no positional argument is provided.
+///
+/// \param argc Argument count passed to main.
+/// \param argv Argument vector passed to main.
+/// \return Parsed matrix dimension N on success, or std::nullopt if invalid.
+std::optional<std::uint32_t> parseMatrixSize(int argc, char **argv)
+{
+    if (argc <= 1)
+    {
+        return 1024u;
+    }
+    if (argc != 2)
+    {
+        std::cerr << "Usage: s1_matmul [N]" << '\n';
+        return std::nullopt;
+    }
+
+    std::string_view arg(argv[1]);
+    if (arg.empty())
+    {
+        std::cerr << "Invalid matrix size N: empty argument" << '\n';
+        return std::nullopt;
+    }
+
+    std::uint32_t value{};
+
+    const auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), value, 10);
+
+    if (ec == std::errc::result_out_of_range)
+    {
+        std::cerr << "Invalid matrix size N (out of range for uint32_t): " << arg << '\n';
+        return std::nullopt;
+    }
+
+    if (ec != std::errc{} || ptr != arg.data() + arg.size())
+    {
+        std::cerr << "Invalid matrix size N (expected positive integer): " << arg << '\n';
+        return std::nullopt;
+    }
+
+    if (value == 0u)
+    {
+        std::cerr << "Invalid matrix size N (must be greater than 0)" << '\n';
+        return std::nullopt;
+    }
+
+    return value;
+}
+
 /// Verifies that every element of the GPU output matrix is finite and within
 /// an absolute error tolerance of the CPU reference result.
 ///
 /// \param gpuC Matrix output read back from the GPU.
 /// \param refC CPU reference output matrix.
 /// \param tolerance Maximum allowed element-wise absolute difference.
+/// \param outMaxAbsError Receives the largest element-wise absolute error.
 /// \return true if sizes match, all GPU outputs are finite, and
 ///         maxAbsError <= tolerance; false otherwise.
-bool verifyMatmulResult(std::span<const float> gpuC, std::span<const float> refC, float tolerance)
+bool verifyMatmulResult(std::span<const float> gpuC, std::span<const float> refC, float tolerance, float &outMaxAbsError)
 {
     if (gpuC.size() != refC.size())
     {
@@ -767,6 +963,7 @@ bool verifyMatmulResult(std::span<const float> gpuC, std::span<const float> refC
         }
     }
 
+    outMaxAbsError = maxAbsError;
     if (maxAbsError > tolerance)
     {
         std::cerr << "Verification FAILED: maxAbsError=" << maxAbsError
@@ -778,7 +975,7 @@ bool verifyMatmulResult(std::span<const float> gpuC, std::span<const float> refC
         return false;
     }
 
-    std::cout << "Verification PASSED: maxAbsError=" << maxAbsError
+    std::cerr << "Verification PASSED: maxAbsError=" << maxAbsError
               << " (tolerance=" << tolerance
               << ", elements=" << gpuC.size()
               << ")" << '\n';
@@ -957,6 +1154,7 @@ struct VariantSpec
 /// median GPU throughput over timed dispatches, and cleans up the pipeline.
 ///
 /// \param device Logical device that owns the pipeline and buffers.
+/// \param memProps Memory properties of the physical device.
 /// \param computeQueue Queue handle on which to submit compute work.
 /// \param cmdRes Command pool, command buffer, and fence bundle.
 /// \param queryRes Timestamp query pool and tick period.
@@ -971,6 +1169,7 @@ struct VariantSpec
 ///         succeeded; false otherwise.
 bool runShaderVariant(
     VkDevice device,
+    const VkPhysicalDeviceMemoryProperties &memProps,
     VkQueue computeQueue,
     const CommandResources &cmdRes,
     const TimestampQueryResources &queryRes,
@@ -982,9 +1181,9 @@ bool runShaderVariant(
     PushConstants dims,
     VariantSpec spec)
 {
-    std::cout << "\n--- Variant: " << spec.label << " (" << spec.spvFilename << ") ---" << '\n';
+    std::cerr << "\n--- Variant: " << spec.label << " (" << spec.spvFilename << ") ---" << '\n';
 
-    bool hasUploaded = uploadFloats(device, bufC, zeroC.data(), bufC.size);
+    bool hasUploaded = uploadToDeviceBuffer(device, memProps, computeQueue, cmdRes, bufC, zeroC.data(), bufC.size);
     if (!hasUploaded)
     {
         return false;
@@ -1015,20 +1214,22 @@ bool runShaderVariant(
         }
     }
 
+    float maxAbsError = 0.0f;
+
     if (ok)
     {
         std::vector<float> gpuC = std::vector<float>(refC.size(), 0.0f);
 
-        bool hasDownloaded = downloadFloats(device, bufC, gpuC.data(), bufC.size);
+        bool hasDownloaded = downloadFromDeviceBuffer(device, memProps, computeQueue, cmdRes, bufC, gpuC.data(), bufC.size);
         if (!hasDownloaded)
         {
             ok = false;
         }
         else
         {
-            constexpr float tolerance = 1e-4f;
+            float tolerance = 1e-4f * (static_cast<float>(dims.K) / 1024.0f);
 
-            bool passedVerification = verifyMatmulResult(gpuC, refC, tolerance);
+            bool passedVerification = verifyMatmulResult(gpuC, refC, tolerance, maxAbsError);
             if (!passedVerification)
             {
                 ok = false;
@@ -1071,7 +1272,12 @@ bool runShaderVariant(
             double medianMs = medianNs / 1e6;
             double minMs = minNs / 1e6;
 
-            std::cout << "[" << spec.label << "] median=" << medianMs << " ms (min=" << minMs << " ms), throughput=" << gflops << " GFLOP/s" << '\n';
+            std::cout << spec.label << ","
+                      << dims.N << ","
+                      << medianMs << ","
+                      << minMs << ","
+                      << gflops << ","
+                      << maxAbsError << '\n';
         }
     }
 
@@ -1081,14 +1287,16 @@ bool runShaderVariant(
 }
 
 /// Picks a physical device, selects a compute queue family, creates a
-/// logical device and compute queue, allocates and populates storage buffers
-/// A, B, and C, runs verification and timestamp-timed benchmarks across
-/// shader variants, and cleans up all device-owned resources before returning.
+/// logical device and compute queue, allocates and populates DEVICE_LOCAL
+/// storage buffers A, B, and C for an N x N x N matmul, runs verification
+/// and timestamp-timed benchmarks across shader variants, prints CSV rows,
+/// and cleans up all device-owned resources before returning.
 ///
 /// \param instance Valid Vulkan instance handle.
+/// \param matrixSize Square matrix dimension N (M = N = K = matrixSize).
 /// \return 0 if every step succeeded; 1 if any device, queue, buffer,
 ///         upload, verification, or timing step failed.
-int setupComputeDevice(VkInstance instance)
+int setupComputeDevice(VkInstance instance, std::uint32_t matrixSize)
 {
     VkPhysicalDevice physicalDevice = pickPhysicalDevice(instance);
     if (physicalDevice == VK_NULL_HANDLE)
@@ -1133,31 +1341,39 @@ int setupComputeDevice(VkInstance instance)
     VkQueue computeQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, *familyIndex, 0, &computeQueue);
 
-    std::cout << "Logical device and compute queue ready (family " << *familyIndex << ")" << '\n';
+    std::cerr << "Logical device and compute queue ready (family " << *familyIndex << ")" << '\n';
 
     VkPhysicalDeviceMemoryProperties memProps{};
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
 
-    constexpr PushConstants dims{.M = 1024u, .N = 1024u, .K = 1024u};
+    PushConstants dims{.M = matrixSize, .N = matrixSize, .K = matrixSize};
 
-    constexpr std::size_t countA = static_cast<std::size_t>(dims.M) * dims.K;
-    constexpr std::size_t countB = static_cast<std::size_t>(dims.K) * dims.N;
-    constexpr std::size_t countC = static_cast<std::size_t>(dims.M) * dims.N;
+    std::size_t countA = static_cast<std::size_t>(dims.M) * dims.K;
+    std::size_t countB = static_cast<std::size_t>(dims.K) * dims.N;
+    std::size_t countC = static_cast<std::size_t>(dims.M) * dims.N;
 
-    constexpr VkDeviceSize bytesA = countA * sizeof(float);
-    constexpr VkDeviceSize bytesB = countB * sizeof(float);
-    constexpr VkDeviceSize bytesC = countC * sizeof(float);
+    VkDeviceSize bytesA = static_cast<VkDeviceSize>(countA) * sizeof(float);
+    VkDeviceSize bytesB = static_cast<VkDeviceSize>(countB) * sizeof(float);
+    VkDeviceSize bytesC = static_cast<VkDeviceSize>(countC) * sizeof(float);
 
-    VkMemoryPropertyFlags hostFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    CommandResources cmdRes = createCommandResources(device, *familyIndex);
+    if (cmdRes.fence == VK_NULL_HANDLE)
+    {
+        vkDestroyDevice(device, nullptr);
+        return 1;
+    }
 
-    BufferResource bufA = createStorageBuffer(device, memProps, bytesA, hostFlags);
-    BufferResource bufB = createStorageBuffer(device, memProps, bytesB, hostFlags);
-    BufferResource bufC = createStorageBuffer(device, memProps, bytesC, hostFlags);
+    constexpr VkBufferUsageFlags deviceUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    BufferResource bufA = createBuffer(device, memProps, bytesA, deviceUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    BufferResource bufB = createBuffer(device, memProps, bytesB, deviceUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    BufferResource bufC = createBuffer(device, memProps, bytesC, deviceUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (bufA.buffer == VK_NULL_HANDLE || bufB.buffer == VK_NULL_HANDLE || bufC.buffer == VK_NULL_HANDLE)
     {
         destroyBuffer(device, bufC);
         destroyBuffer(device, bufB);
         destroyBuffer(device, bufA);
+        destroyCommandResources(device, cmdRes);
         vkDestroyDevice(device, nullptr);
         return 1;
     }
@@ -1175,11 +1391,13 @@ int setupComputeDevice(VkInstance instance)
         hostB[i] = static_cast<float>((i + 3) % 5) * 0.5f;
     }
 
-    bool ok = uploadFloats(device, bufA, hostA.data(), bytesA) && uploadFloats(device, bufB, hostB.data(), bytesB) && uploadFloats(device, bufC, hostC.data(), bytesC);
+    bool ok = uploadToDeviceBuffer(device, memProps, computeQueue, cmdRes, bufA, hostA.data(), bytesA) &&
+              uploadToDeviceBuffer(device, memProps, computeQueue, cmdRes, bufB, hostB.data(), bytesB) &&
+              uploadToDeviceBuffer(device, memProps, computeQueue, cmdRes, bufC, hostC.data(), bytesC);
 
     if (ok)
     {
-        std::cout << "Uploaded host data to A(" << dims.M << "x" << dims.K
+        std::cerr << "Uploaded host data to A(" << dims.M << "x" << dims.K
                   << "), B(" << dims.K << "x" << dims.N
                   << "), zeroed C(" << dims.M << "x" << dims.N
                   << ")" << '\n';
@@ -1196,7 +1414,6 @@ int setupComputeDevice(VkInstance instance)
     {
         std::vector<float> refC = cpuMatmulReference(hostA, hostB, dims);
 
-        CommandResources cmdRes = createCommandResources(device, *familyIndex);
         TimestampQueryResources queryRes = createTimestampQueryPool(device, deviceProps.limits.timestampPeriod);
 
         if (cmdRes.fence == VK_NULL_HANDLE || queryRes.queryPool == VK_NULL_HANDLE)
@@ -1207,12 +1424,14 @@ int setupComputeDevice(VkInstance instance)
         {
             constexpr std::array<VariantSpec, 3> variants{{{.label = "Naive 16x16", .spvFilename = "matmul_naive.spv", .outputTileWidth = 16u, .outputTileHeight = 16u},
                                                            {.label = "Shared-Memory Tiled 16x16", .spvFilename = "matmul_tiled.spv", .outputTileWidth = 16u, .outputTileHeight = 16u},
-                                                           {.label = "Register-Blocked 64x64 (8x8/thread)", .spvFilename = "matmul_regblocked.spv", .outputTileWidth = 64u, .outputTileHeight = 64u}}};
+                                                           {.label = "Register-Blocked 64x64 (4x4/thread)", .spvFilename = "matmul_regblocked.spv", .outputTileWidth = 64u, .outputTileHeight = 64u}}};
 
+            std::cout << "variant,N,median_ms,min_ms,GFLOPs,maxAbsError\n";
             for (const auto &spec : variants)
             {
                 bool variantOk = runShaderVariant(
-                    device, computeQueue, cmdRes, queryRes,
+                    device, memProps, computeQueue,
+                    cmdRes, queryRes,
                     bufA, bufB, bufC,
                     hostC, refC, dims, spec);
                 if (!variantOk)
@@ -1224,25 +1443,36 @@ int setupComputeDevice(VkInstance instance)
         }
 
         destroyTimestampQueryPool(device, queryRes);
-        destroyCommandResources(device, cmdRes);
     }
 
     destroyBuffer(device, bufC);
     destroyBuffer(device, bufB);
     destroyBuffer(device, bufA);
+    destroyCommandResources(device, cmdRes);
     vkDestroyDevice(device, nullptr);
 
     return status;
 }
 
-/// Prints the Vulkan instance version, creates an instance, sets up a
-/// logical device and compute queue on the discrete GPU via
-/// setupComputeDevice, and destroys the instance before exiting.
+/// Parses the optional matrix dimension N from the command line, prints the
+/// Vulkan instance version, creates an instance, sets up a logical device and
+/// compute queue on the discrete GPU via setupComputeDevice, and destroys the
+/// instance before exiting.
 ///
-/// \return 0 if every step succeeded; 1 if querying the version, creating
-///         the instance, or setting up the compute device failed.
-int main()
+/// \param argc Command-line argument count.
+/// \param argv Command-line argument vector.
+/// \return 0 if every step succeeded; 1 if argument parsing, querying the
+///         version, creating the instance, or setting up the compute device
+///         failed.
+int main(int argc, char **argv)
 {
+
+    std::optional<std::uint32_t> matrixSize = parseMatrixSize(argc, argv);
+    if (!matrixSize)
+    {
+        return 1;
+    }
+
     std::uint32_t version{};
 
     VkResult enumerateResult = vkEnumerateInstanceVersion(&version);
@@ -1256,7 +1486,7 @@ int main()
     std::uint32_t minor = VK_API_VERSION_MINOR(version);
     std::uint32_t patch = VK_API_VERSION_PATCH(version);
 
-    std::cout << "Vulkan instance version: " << major << "." << minor << "." << patch << '\n';
+    std::cerr << "Vulkan instance version: " << major << "." << minor << "." << patch << '\n';
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1279,9 +1509,9 @@ int main()
         return 1;
     }
 
-    std::cout << "Instance created" << '\n';
+    std::cerr << "Instance created" << '\n';
 
-    int status = setupComputeDevice(instance);
+    int status = setupComputeDevice(instance, *matrixSize);
 
     vkDestroyInstance(instance, nullptr);
 

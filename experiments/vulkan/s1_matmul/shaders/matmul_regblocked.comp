@@ -3,10 +3,10 @@
 #define BM 64u
 #define BN 64u
 #define BK 16u
-#define TM 8u
-#define TN 8u
+#define TM 4u
+#define TN 4u
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer BufferA {
     float A[];
@@ -26,13 +26,14 @@ layout(push_constant) uniform PushConstants {
     uint K;
 } pc;
 
-shared float tileA[BM][BK];
+// +1 column padding avoids 8-way shared-memory bank conflicts on column reads
+shared float tileA[BM][BK + 1u];
 shared float tileB[BK][BN];
 
 void main() {
     uint lx = gl_LocalInvocationID.x;
     uint ly = gl_LocalInvocationID.y;
-    uint tid = ly * 8u + lx;
+    uint tid = ly * 16u + lx;
 
     uint blockRow = gl_WorkGroupID.y * BM;
     uint blockCol = gl_WorkGroupID.x * BN;
@@ -50,8 +51,9 @@ void main() {
     uint numTiles = (pc.K + BK - 1u) / BK;
 
     for (uint t = 0u; t < numTiles; ++t) {
-        for (uint i = 0u; i < 16u; ++i) {
-            uint idx = tid + i * 64u;
+        // 256 threads cooperatively load 64x16 = 1024 floats (4 per thread, coalesced along BK=16)
+        for (uint i = 0u; i < 4u; ++i) {
+            uint idx = tid + i * 256u;
             uint aLocalRow = idx / BK;
             uint aLocalCol = idx % BK;
             uint globalRow = blockRow + aLocalRow;
@@ -64,8 +66,9 @@ void main() {
             }
         }
 
-        for (uint i = 0u; i < 16u; ++i) {
-            uint idx = tid + i * 64u;
+        // 256 threads cooperatively load 16x64 = 1024 floats (4 per thread, coalesced along BN=64)
+        for (uint i = 0u; i < 4u; ++i) {
+            uint idx = tid + i * 256u;
             uint bLocalRow = idx / BN;
             uint bLocalCol = idx % BN;
             uint globalRow = t * BK + bLocalRow;
